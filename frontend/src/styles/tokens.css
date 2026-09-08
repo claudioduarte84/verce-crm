@@ -1,0 +1,32 @@
+/**
+ * Semantic design tokens (mission §19). Just enough for the S1 shell — the full 10-theme
+ * catalogue with dark-mode swaps belongs to S15. Component CSS must reference these tokens,
+ * never a raw VERCE color literal.
+ */
+:root {
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f4f5f7;
+  --color-text: #1a1d21;
+  --color-text-muted: #5b6270;
+  --color-border: #d9dce1;
+  --color-primary: #1f5eff;
+  --color-primary-contrast: #ffffff;
+  --color-accent: #7c3aed;
+  --color-danger: #d1293d;
+  --color-warning: #b5750a;
+  --color-success: #16794f;
+  --color-focus: #1f5eff;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+
+  --font-family-base:
+    system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}

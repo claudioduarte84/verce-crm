@@ -1,0 +1,31 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Verce.Api/Verce.Api.csproj" />
+    <Project Path="src/Verce.Platform/Verce.Platform.csproj" />
+    <Project Path="src/Verce.SharedKernel/Verce.SharedKernel.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/">
+    <Project Path="src/Modules/Verce.Modules.AI/Verce.Modules.AI.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Catalog/Verce.Modules.Catalog.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Costing/Verce.Modules.Costing.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Customers/Verce.Modules.Customers.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Documents/Verce.Modules.Documents.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Energy/Verce.Modules.Energy.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Finance/Verce.Modules.Finance.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Inventory/Verce.Modules.Inventory.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Pricing/Verce.Modules.Pricing.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Production/Verce.Modules.Production.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Quoting/Verce.Modules.Quoting.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Reporting/Verce.Modules.Reporting.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Sales/Verce.Modules.Sales.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Settings/Verce.Modules.Settings.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Verce.Architecture.Tests/Verce.Architecture.Tests.csproj" />
+    <Project Path="tests/Verce.IntegrationTests/Verce.IntegrationTests.csproj" />
+    <Project Path="tests/Verce.Platform.Tests.Fixtures.Cyclic/Verce.Platform.Tests.Fixtures.Cyclic.csproj" />
+    <Project Path="tests/Verce.Platform.Tests.Fixtures.Orphan/Verce.Platform.Tests.Fixtures.Orphan.csproj" />
+    <Project Path="tests/Verce.Platform.Tests/Verce.Platform.Tests.csproj" />
+    <Project Path="tests/Verce.SharedKernel.Tests/Verce.SharedKernel.Tests.csproj" />
+  </Folder>
+</Solution>

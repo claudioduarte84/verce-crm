@@ -1,0 +1,85 @@
+# ==================================================
+# .NET
+# ==================================================
+bin/
+obj/
+out/
+*.pdb
+*.user
+*.suo
+.vs/
+*.userosscache
+*.sln.docstates
+
+# ==================================================
+# Node / Vite / frontend
+# ==================================================
+node_modules/
+dist/
+dist-ssr/
+.vite/
+.vite-inspect/
+*.local
+coverage/
+
+# ==================================================
+# Testing artifacts
+# ==================================================
+TestResults/
+test-results/
+playwright-report/
+playwright/.cache/
+blob-report/
+*.trx
+*.coverage
+*.coveragexml
+
+# ==================================================
+# Local application state / generated content
+# ==================================================
+.local-storage/
+.uploads/
+.generated-documents/
+local-storage/
+uploads/
+generated-documents/
+*.local.db
+
+# ==================================================
+# Security - never commit these
+# ==================================================
+.dataprotection/
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+secrets.json
+appsettings.*.Local.json
+appsettings.Development.local.json
+.env
+.env.*
+!.env.example
+*bootstrap-secret*
+*recovery-secret*
+!**/fixtures/**/*secret*
+
+# ==================================================
+# IDE
+# ==================================================
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ==================================================
+# Docker
+# ==================================================
+docker-compose.override.yml
+
+# ==================================================
+# Logs
+# ==================================================
+*.log
+logs/

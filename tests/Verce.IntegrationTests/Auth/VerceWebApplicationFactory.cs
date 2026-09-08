@@ -1,0 +1,155 @@
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Verce.IntegrationTests.Auth;
+
+/// <summary>
+/// Boots the REAL Verce.Api host (Program.cs, unmodified) against the Testcontainers Postgres
+/// database, in the Development profile so Data Protection uses its file-system fallback
+/// without requiring a certificate (E-9) — exactly the same composition root S1 ships, not a
+/// test-only rewiring of authentication/authorization.
+/// </summary>
+public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
+{
+    // M-TESTHOST-001: some platform startup code (AddVerceOutboxScheduling) reads configuration
+    // EAGERLY, as part of AddVercePlatform's synchronous registration call in Program.cs — which
+    // runs BEFORE builder.Build(). WebApplicationFactory's ConfigureWebHost/ConfigureAppConfiguration
+    // override below is only merged in once Program.cs itself calls builder.Build() (via the
+    // DeferredHostBuilder mechanism), so it arrives too late for that eager read; an eager reader
+    // would see the pre-override configuration instead. Environment variables ARE read eagerly by
+    // WebApplicationBuilder.CreateBuilder(args) itself, ahead of any of Program.cs's own code, so
+    // mirroring settings there makes them visible in time — there is no clean way to remove this
+    // without an elaborate deferred-registration rework of Quartz's own fluent configuration API,
+    // which reads its connection string and job/trigger cadences just as eagerly (Option A in the
+    // mission was evaluated and rejected as disproportionate; this is Option B, implemented with
+    // the required rigor below).
+    //
+    // Because environment variables are process-wide, EVERY factory in the process serializes on
+    // this single lock for its ENTIRE lifetime (acquired here in the constructor, released only in
+    // DisposeAsync) — not just for the moment it mutates variables. That is what makes "two factory
+    // instances cannot overlap environment mutation" true regardless of xUnit scheduling, rather
+    // than merely relying on tests usually running sequentially. SemaphoreSlim is deliberately used
+    // instead of a lock/Monitor: release is not thread-affine, so holding it across the awaited
+    // lifetime of an async test (whose continuations may resume on a different thread) is safe.
+    private static readonly SemaphoreSlim EnvironmentLock = new(1, 1);
+
+    // The environment value each key held the FIRST time any factory in this process touched it —
+    // never merely "null" — so a value a developer's shell or CI legitimately set survives every
+    // factory's construction and disposal. Populated at most once per key, on first touch.
+    private static readonly Dictionary<string, string?> OriginalEnvironmentValues = new();
+    private static readonly HashSet<string> KeysEverSet = new();
+
+    private readonly string _connectionString;
+    private readonly IReadOnlyDictionary<string, string?> _extraConfiguration;
+    private readonly Dictionary<string, string?> _settings;
+    private bool _environmentLockHeld;
+
+    /// <param name="connectionString">The real PostgreSQL connection string.</param>
+    /// <param name="extraConfiguration">Additional configuration overrides — e.g. a host-execution
+    /// test (mission §19-23) passes <c>Outbox:SchedulingEnabled=true</c> plus fast test cadences.
+    /// Every OTHER test in this project manipulates outbox rows directly and must never race a
+    /// live scheduler, so the default (no override) is scheduling DISABLED here — production's
+    /// own composition root leaves it enabled; only this test factory opts out by default.</param>
+    public VerceWebApplicationFactory(string connectionString, IReadOnlyDictionary<string, string?>? extraConfiguration = null)
+    {
+        _connectionString = connectionString;
+        _extraConfiguration = extraConfiguration ?? new Dictionary<string, string?>();
+
+        _settings = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Verce"] = _connectionString,
+            ["DataProtection:DevKeyDirectory"] = Path.Combine(Path.GetTempPath(), "verce-test-dp-" + Guid.NewGuid().ToString("N")),
+            ["Outbox:SchedulingEnabled"] = "false",
+        };
+        foreach (var (key, value) in _extraConfiguration) _settings[key] = value;
+
+        EnvironmentLock.Wait();
+        _environmentLockHeld = true;
+        try
+        {
+            // Defense in depth (should already be a no-op — the previous holder's DisposeAsync
+            // restores originals before releasing this same lock): put every key ANY factory has
+            // ever touched back to its true original before applying this instance's own settings,
+            // so a key this instance does NOT override can never observe a PREVIOUS instance's
+            // leftover value.
+            RestoreAllEverSetKeysToOriginal();
+
+            foreach (var (key, value) in _settings)
+            {
+                var envKey = key.Replace(":", "__");
+                if (KeysEverSet.Add(envKey))
+                    OriginalEnvironmentValues[envKey] = Environment.GetEnvironmentVariable(envKey);
+                Environment.SetEnvironmentVariable(envKey, value);
+            }
+
+            // Quartz.Logging.LogProvider caches its resolved provider (wrapping whichever
+            // ILoggerFactory was live at first use) in a process-wide static, set directly by
+            // Quartz.Extensions.Hosting rather than gated by LogProvider.IsDisabled. Production
+            // runs exactly one long-lived host per process, so this is invisible there; this
+            // factory boots a fresh host per test, and once one Quartz-enabled host disposes its
+            // ILoggerFactory, the NEXT host's first Quartz log call would throw
+            // ObjectDisposedException against the PREVIOUS host's already-disposed factory.
+            // Resetting it here — guarded by the SAME lock that guarantees no other factory's
+            // host is live right now — forces a fresh resolution against THIS host's own
+            // (currently alive) ILoggerFactory. Test-only: this type never ships in Verce.Api.
+            Quartz.Logging.LogProvider.SetCurrentLogProvider(null!);
+        }
+        catch
+        {
+            _environmentLockHeld = false;
+            EnvironmentLock.Release();
+            throw;
+        }
+    }
+
+    private static void RestoreAllEverSetKeysToOriginal()
+    {
+        foreach (var envKey in KeysEverSet)
+            Environment.SetEnvironmentVariable(envKey, OriginalEnvironmentValues.GetValueOrDefault(envKey));
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Development");
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(_settings));
+
+        // D-11 needs SecurityStamp revalidation to happen on every request, not on the
+        // framework's default 30-minute cadence, so the test can observe session invalidation
+        // deterministically without waiting in real time.
+        builder.ConfigureServices(services =>
+            services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.Zero));
+    }
+
+    /// <summary>
+    /// The cookie policy is SecurePolicy.Always (SECURITY §2.3) — the antiforgery AND auth
+    /// cookies are both rejected/refused over a plain-HTTP request. TestServer's in-memory
+    /// transport never does a real TLS handshake either way, so an https:// base address is
+    /// the correct way to exercise the SAME cookie policy production actually runs under,
+    /// not a workaround around it.
+    /// </summary>
+    public HttpClient CreateHttpsClient() =>
+        CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+
+    public override async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await base.DisposeAsync();
+        }
+        finally
+        {
+            if (_environmentLockHeld)
+            {
+                // Leave the process exactly as this factory found it, THEN release the lock —
+                // the next factory's constructor is guaranteed to see truly-original values even
+                // if it doesn't override every key this instance did.
+                RestoreAllEverSetKeysToOriginal();
+                _environmentLockHeld = false;
+                EnvironmentLock.Release();
+            }
+        }
+    }
+}
