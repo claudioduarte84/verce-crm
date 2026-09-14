@@ -11,14 +11,15 @@ prompt uses one of these terms, it means exactly what is written here and nothin
 |---|---|---|---|
 | Money | BRL | `numeric(18,2)` presented, `numeric(18,6)` intermediate | never `float` |
 | Percent | fraction | `numeric(9,6)` | `0.175` = 17,5%. The UI multiplies by 100 for display and divides on input. |
-| Filament weight | gram | `numeric(12,3)` | consumption is always grams, never kg |
-| Filament price | R$/kg | `numeric(18,6)` | purchase is per spool, price is normalized per kg |
+| Filament spool weight | gram | `numeric(12,3)` | `Supply.FilamentDetails.SpoolNetWeightGrams`, informational — a filament supply's actual stock is tracked in its own `BaseUnit` (usually `Gram`), not derived from spool weight |
+| Filament diameter | mm | `numeric(6,4)` | `Supply.FilamentDetails.DiameterMm` |
+| Supply quantity / stock | supply's own `BaseUnit` | `numeric(14,4)` | see `SupplyBaseUnit` below — S3 generalizes this across every supply, not filament grams only ([ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) §4) |
+| Purchase / movement cost | R$ per base unit | `numeric(18,6)` snapshot, `numeric(18,2)` total | informational only, not a costing policy — see §5 |
 | Energy | kWh | `numeric(12,4)` | |
 | Energy tariff | R$/kWh | `numeric(18,6)` | may or may not include taxes — see `includes_taxes` |
 | Power | watt | `integer` | |
 | Print time | second | `integer` | displayed as `3h25` |
 | Labor time | minute | `integer` | |
-| Quantity | supply-dependent | `numeric(14,4)` | must match the supply's `unit` |
 
 ---
 
@@ -27,23 +28,26 @@ prompt uses one of these terms, it means exactly what is written here and nothin
 ### `PersonType`
 `INDIVIDUAL` (pessoa física, CPF) · `COMPANY` (pessoa jurídica, CNPJ)
 
-### `SupplyUnit`
-`UNIT` (unidade) · `GRAM` · `KILOGRAM` · `MILLILITER` · `LITER` · `CENTIMETER` · `METER` ·
-`SQUARE_METER` · `HOUR`
+### `SupplyBaseUnit` *(supersedes `SupplyUnit` — [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md))*
+`Gram` · `Kilogram` · `Unit` (unidade) · `Milliliter` · `Liter` · `Meter` · `Centimeter`.
+Immutable once a supply is created. Only the deterministic pairs kg↔g, L↔mL, m↔cm convert into
+each other; `Unit` has no compatible sibling.
 
-### `SupplyCategoryKind`
-`CONSUMABLE` (cola, verniz, tinta) · `COMPONENT` (argola, parafuso, ímã) ·
-`PACKAGING` (sacola, caixa) · `LABEL` (etiqueta) · `ACCESSORY` · `OTHER`
+### `SupplyCategory` *(reference data — Category 3, textual code PK, supersedes `SupplyCategoryKind`)*
+`FILAMENT` · `RESIN` · `PACKAGING` · `HARDWARE` · `ELECTRONICS` · `FINISHING` · `CONSUMABLE` ·
+`OTHER` — classification only, no calculation logic. Seeded rows, not a C# enum, so a new
+category is data.
 
-`PACKAGING` is the flag that makes packaging a separate line in the cost breakdown. It is a
-category kind, not a separate entity.
+### `FilamentMaterialType`
+`Pla` · `PlaPlus` · `Petg` · `Abs` · `Asa` · `Tpu` · `Nylon` · `Pc` · `Pva` · `Other` — set only
+when `Supply.FilamentDetails` is present.
 
-### `MaterialKind`
-`FILAMENT` · `SUPPLY` — the discriminator shared by stock movements and consumption records.
-
-### `StockMovementReason`
-`PURCHASE` · `PRODUCTION_CONSUMPTION` · `MANUAL_ADJUSTMENT` · `INVENTORY_COUNT` ·
-`LOSS` · `RETURN`
+### `InventoryMovementType` *(supersedes `MaterialKind` / `StockMovementReason`)*
+Actively creatable in S3: `InitialBalance` (once) · `PurchaseReceipt` · `ManualIncrease` ·
+`ManualDecrease` · `Correction`. Reserved for later modules, not yet creatable by any endpoint:
+`Consumption` · `ReturnIn` · `ReturnOut`. There is no separate `MaterialKind` discriminator —
+`InventoryMovement` belongs to exactly one `Supply`, and that supply's own `SupplyCategory`
+(e.g. `FILAMENT`) is how a report distinguishes filament movements from any other supply's.
 
 ### `QuoteStatus`
 See [STATE-MACHINES §1](STATE-MACHINES.md#1-quote-revision-status).
@@ -169,10 +173,12 @@ The prompt requires this separation explicitly; results that do not carry a kind
 | `quote_item.unit_cost_amount` | Estimated cost per unit at issue time | Reading current cost instead |
 | `quote_item_cost_snapshot.*` | Frozen values, never recomputed | Joining to live master data to "refresh" |
 | `fee_rule_version.commission_percent` | Fraction | Storing `18` instead of `0.18` |
-| `filament.current_price_per_kg` | Live price for **new** calculations only | Using it to explain an old quote |
+| `supply.latest_purchase_unit_cost` | Last purchase only, informational | Treating it as an actual costing policy (FIFO/LIFO/weighted-average) — that choice is still open, see §5 |
+| `supply.current_stock_base_unit` | Cached projection of the signed sum of `inventory_movement` | Mutating it directly anywhere outside `Supply.Post()` — there is no such code path |
 | `expense.amount` with `INVENTORY_PURCHASE` | Cash out, not period cost | Summing it into monthly costs |
 | `production_order.quote_revision_id` | The idempotency key | Allowing two orders per revision |
-| `stock_movement.quantity` | Signed by `direction` semantics | Storing an unsigned value and losing the direction |
+| `inventory_movement.entered_quantity` / `entered_unit` | Immutable operator-entered fact (`numeric(18,8)` plus closed unit catalogue) | Reconstructing an entered purchase from its normalized delta |
+| `inventory_movement.quantity_delta_base_unit` | Signed normalized base-unit delta; the internal constructor validates its sign against `type` and rejects zero | Storing an unsigned value and inferring sign from `type` separately — they could disagree |
 | `sale.total_cost_amount` | Best-known cost; see `cost_basis` | Assuming it is always actual |
 | `quote_revision.technical_highlights` | Free `{label, value}` pairs for presentation | Turning `material` or `tolerance` into required domain columns |
 | `quote_revision.payment_terms` etc. | **Copied** from settings at issue | Reading the current setting when rendering an old proposal |
@@ -261,12 +267,17 @@ create a third number that can disagree with the two it derives from.
 ### 4.4 Consumption
 
 ```
-filamentConsumption(period) = Σ stock_movement.quantity
-                              where material_kind = FILAMENT
-                                and reason = PRODUCTION_CONSUMPTION
+supplyConsumption(period)   = Σ inventory_movement.quantity_delta_base_unit
+                              where type = Consumption
                                 and occurred_at in period
+                              (grouped by supply_id; filter supply.category_code = 'FILAMENT'
+                               for the filament-only view)
 energyConsumption(period)   = Σ energy_consumption_session.kwh where started_at in period
 ```
+
+> `Consumption` is reserved in `InventoryMovementType` but not yet emitted by any S3 endpoint —
+> this formula is forward-looking until the Production module (S8–S11) records actual consumption
+> as `Consumption` movements. See [ADR-0017 §1](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md).
 
 ### 4.5 Home dashboard
 
@@ -287,17 +298,22 @@ Sorting: date, value (`total_amount`), status, customer name.
 
 ## 5. Policies
 
-### Filament price policy
-*(setting `inventory.filament_price_policy`)* <a id="filament-price-policy"></a>
+### Purchase cost policy (deferred to S4) <a id="purchase-cost-policy-deferred-to-s4"></a>
+
+S3 records a `PurchaseReceipt` movement's `UnitCostSnapshot`/`TotalCostSnapshot` and caches the
+latest one on `Supply.LatestPurchaseUnitCost` — **last purchase only**, purely informational (see
+[ADR-0017 §5](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md)). S3 makes **no**
+choice between an actual costing policy:
 
 | Policy | Behaviour | Status |
 |---|---|---|
-| `LAST_PURCHASE` | Registering a lot sets `current_price_per_kg` to that lot's price and appends price history | **default, v1** |
-| `MANUAL` | Lots record purchases but never change the current price; the operator sets it | v1 |
-| `WEIGHTED_AVERAGE` | Current price = value-weighted average of remaining stock | **deferred** — requires per-lot consumption tracking (which spool was used), which the shop floor does not currently record |
+| `LAST_PURCHASE` | The most recent purchase's unit cost is what costing reads | S3's *de facto* snapshot behaviour, not yet a chosen policy |
+| `MANUAL` | An operator sets the costing unit cost independently of purchase history | Open |
+| `WEIGHTED_AVERAGE` | Costing unit cost = value-weighted average of remaining stock | Open — requires consumption tracking the Production module does not exist to provide yet |
 
-Whatever the policy, a price change **appends history** and **never touches an existing
-snapshot**.
+Whichever policy S4 chooses, it must not retroactively change a quote or production order already
+costed — the same historical-immutability rule as everywhere else in this product
+([ADR-0006](architecture/ADR-0006-estimated-vs-actual-cost.md)).
 
 ### Price rounding policy
 *(setting `pricing.price_rounding_policy`)* — see
@@ -309,9 +325,16 @@ Default `CENT`. All non-default policies round **up**.
 Changing the setting affects only revisions issued afterwards.
 
 ### Stock enforcement
-v1 **warns** on insufficient stock; it never blocks a quote or a production order. Blocking is
-an explicit open decision (see the S0 report), because a shop that prints on demand routinely
-quotes material it has not bought yet.
+**Inventory movements themselves are a hard, blocking invariant as of S3**: a `ManualDecrease` (or
+a `Correction` whose derived delta is negative) that would drive a supply's stock below zero is
+rejected (`INSUFFICIENT_STOCK`), and two concurrent decreases against the same supply cannot both
+succeed — see [ADR-0017 §3](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md).
+This reverses the v1 "warn, never block" default for that one surface.
+
+**Quotes and production orders are unaffected by this**: creating either with insufficient stock
+still only warns, never blocks, exactly as before — a shop that prints on demand routinely quotes
+material it has not bought yet. Whether *that* changes remains the open decision from the S0
+report; S3 did not touch it.
 
 ---
 
@@ -325,11 +348,15 @@ For UI copy and AI prompt construction. The database and code always use the Eng
 | Endereço | Address |
 | Produto | Product |
 | Ficha técnica / Receita | ProductRecipe |
-| Filamento | Filament |
+| Filamento | `Supply.FilamentDetails` (no separate `Filament` class as of S3 — [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) §6) |
 | Insumo | Supply |
-| Embalagem | Packaging (supply category kind) |
-| Lote | Lot |
+| Categoria de insumo | SupplyCategory |
+| Embalagem | Packaging (`SupplyCategory` code `PACKAGING`) |
+| Movimentação de estoque | InventoryMovement |
 | Estoque | Stock |
+| Estoque baixo | Low stock (`CurrentStockBaseUnit <= MinimumStock`) |
+| Saldo inicial | Initial balance (`InventoryMovementType.InitialBalance`) |
+| Ajuste manual | Manual adjustment (`ManualIncrease` / `ManualDecrease` / `Correction`) |
 | Máquina / Impressora | Machine |
 | Tarifa de energia | EnergyTariff |
 | Laboratório / Experimento | CostExperiment |

@@ -59,83 +59,95 @@ suframa. The product is not a fiscal system (PRODUCT-VISION §5).
 
 ## 3. Inventory module
 
-### 3.1 Why Filament is not a Supply
+> **S3 supersedes the original plan below.** The S1-era design in this section modeled Filament
+> as its own aggregate with per-lot stock and cost history. The S3 mission brief made a more
+> specific, generalized design mandatory instead: quantities/units must work uniformly across
+> *every* supply (resin in mL, packaging in `un`, cord in meters — not filament-in-grams only),
+> and non-negative stock became a hard invariant rather than a warning. See
+> [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) for the full
+> reasoning and the rejected alternatives; what follows is the model as actually implemented.
 
-Filament is modeled as **its own aggregate**, not as a `Supply` row with attributes, because:
+### 3.1 Supply (AR)
+`Id`, `Code` (unique, human-usable, normalized uppercase, **immutable after creation**), `Name`,
+`Description?`, `CategoryCode` (→ `SupplyCategory`), `BaseUnit: SupplyBaseUnit`
+(**immutable after creation**), `Active`, `MinimumStock?` (base unit), `PreferredSupplier?`,
+`Notes?`, `FilamentDetails?` (optional value, see §3.3), `CurrentStockBaseUnit` (cached, see §3.5),
+`LatestPurchaseUnitCost?` (informational snapshot — see §3.7, not a costing policy),
+`HasRecordedMovement` (gates the one-time initial balance), `CreatedAt`/`UpdatedAt`, `Version`.
 
-- its cost unit is **price per kilogram** while consumption is measured in **grams**, and the
-  conversion is part of the domain formula, not a display concern;
-- it carries dimensions no other supply has (material, brand, commercial name, color, spool
-  weight, lot code) that products select by;
-- its purchase model is spool/lot based, and its stock is tracked per spool;
-- reporting requires "filament consumption" as a first-class dimension.
-
-Forcing both into one table would produce a wide table of mostly-null columns and a
-`if (isFilament)` branch in the cost engine. Both are unified only where it is genuinely
-useful: **stock movements** and **cost history** share a `MaterialKind {FILAMENT, SUPPLY}`
-discriminator.
-
-### 3.2 Supply (AR)
-`Id`, `Code?` (SKU), `Name`, `SupplyCategoryId`, `Unit: SupplyUnit`, `CurrentUnitCost: Money`,
-`Description?`, `IsPackaging: bool`, `TracksStock: bool`, `IsActive`, `DeletedAt?`.
-
-`SupplyUnit` enum: `UNIT`, `GRAM`, `KILOGRAM`, `MILLILITER`, `LITER`, `CENTIMETER`, `METER`,
-`SQUARE_METER`, `HOUR`.
+`SupplyBaseUnit` enum: `Gram`, `Kilogram`, `Unit`, `Milliliter`, `Liter`, `Meter`, `Centimeter`.
 
 Invariants:
-- `CurrentUnitCost ≥ 0`.
-- Changing `CurrentUnitCost` **must** append a `SupplyCostHistory` entry; direct mutation
-  without history is impossible (the setter is a domain method `ChangeUnitCost(cost, at, reason)`).
-- `Unit` cannot change once the supply is referenced by any recipe or quote snapshot.
+- `Code` matches `^[A-Za-z0-9._-]{2,40}$`, normalized uppercase at construction, unique.
+- `MinimumStock`, when set, is `>= 0`.
+- `LowStock = CurrentStockBaseUnit <= MinimumStock` (only meaningful once `MinimumStock` is set).
+- Deactivating never deletes; an inactive supply is excluded from the default list (`status=active`
+  when omitted), remains fully readable, can be reactivated, and still permits inventory managers
+  to post receipts/reconciliation movements. Deactivation removes an item from the operational
+  catalogue; it never freezes or erases physical inventory history.
+- **Not** "PLA = one generic cost": every color/brand/diameter variant is its own `Supply` row
+  with its own stock and cost — filament granularity comes from having many `Supply` rows in the
+  `FILAMENT` category, not from a shared filament entity.
 
-Children/related: `SupplyCostHistory` (*E*): `SupplyId`, `UnitCost`, `ValidFrom`, `ValidUntil?`,
-`Source {MANUAL, PURCHASE, IMPORT}`, `SourceLotId?`, `Notes?`.
-Windows are half-open and non-overlapping per supply.
+### 3.2 SupplyCategory (Category 3 reference data)
+`Code` (PK — `FILAMENT`, `RESIN`, `PACKAGING`, `HARDWARE`, `ELECTRONICS`, `FINISHING`,
+`CONSUMABLE`, `OTHER`), `Name`, `IsActive`. Classification only — no calculation logic and no
+per-category behaviour; a future category is a seeded data row, never a deploy.
 
-### SupplyCategory (AR, simple)
-`Id`, `Name`, `Kind {CONSUMABLE, COMPONENT, PACKAGING, LABEL, ACCESSORY, OTHER}`, `IsActive`.
+### 3.3 Filament details (optional value on Supply, not a separate aggregate)
+`FilamentDetails { MaterialType, Brand, ColorName, ColorCode?, DiameterMm, SpoolNetWeightGrams }`,
+present only when `Supply.CategoryCode = FILAMENT` in practice (structurally optional on any
+supply). `FilamentMaterialType` enum: `Pla`, `PlaPlus`, `Petg`, `Abs`, `Asa`, `Tpu`, `Nylon`, `Pc`,
+`Pva`, `Other`. Persisted as individual nullable scalar columns on `supply` — deliberately **not**
+an EF owned type, so it never becomes its own entity in the ADR-0011 PK-category model (see
+ADR-0017 §7).
 
-### 3.3 Filament (AR)
-`Id`, `Material: FilamentMaterial`, `BrandId`, `CommercialName` (e.g. "Preto Eclipse"),
-`ColorName`, `ColorHex?`, `Diameter {MM_175, MM_285}`, `CurrentPricePerKg: Money`,
-`DensityGramsPerCm3?`, `Notes?`, `IsActive`, `DeletedAt?`.
+### 3.4 Inventory ledger — InventoryMovement (*E* of Supply, append-only)
+`Id`, `SupplyId`, `Type: InventoryMovementType`, `QuantityDeltaBaseUnit` (**signed**, base unit),
+`OccurredAt`, `Reason?`, `Reference?`, `Supplier?`, `UnitCostSnapshot?`, `TotalCostSnapshot?`.
 
-`FilamentMaterial` is a **lookup table, not a C# enum** (`PLA`, `PETG`, `TPU`, `ABS`, `ASA`,
-`PLA_SILK`, …) so new materials are data. Same for `FilamentBrand`.
+`InventoryMovementType`: `InitialBalance` (once, only before any other movement exists),
+`PurchaseReceipt`, `ManualIncrease`, `ManualDecrease`, `Correction` (reconciles to a counted
+absolute quantity by posting the derived signed delta) — all actively creatable in S3.
+`Consumption`, `ReturnIn`, `ReturnOut` exist in the enum but are **not yet creatable by any
+endpoint** — reserved for the Production and Sales modules (S8–S11).
 
-Invariants:
-- `CurrentPricePerKg > 0` when active.
-- Price changes append `FilamentPriceHistory`; same rule as supplies.
-- Identity is (material, brand, commercial name, color, diameter) — unique among non-deleted.
+Movements are **immutable**: there is no `Update`, `Delete` or `Remove` anywhere on
+`InventoryMovement` (enforced by a reflection-based domain test) — a miscount is corrected by
+posting a new `Correction` movement, never by editing a prior row.
 
-### FilamentLot (*E* of Filament, but persisted as its own table)
-`Id`, `FilamentId`, `LotCode?`, `PurchasedAt: DateOnly`, `PurchasedWeightGrams: Grams`,
-`PurchaseAmount: Money`, `SupplierName?`, `ExpenseId?`, `Notes?`.
+### 3.5 Stock is a cached projection, and is non-negative by construction
+`CurrentStockBaseUnit` is written only by the same aggregate operation that appends a movement, in
+the same transaction — never independently. It is always equal to the signed sum of that supply's
+`InventoryMovement` rows. A decrease that would take it below zero is rejected
+(`INSUFFICIENT_STOCK`, HTTP 409) before any write is attempted, and two concurrent decreases
+against the same supply cannot both succeed — see
+[ADR-0017 §3](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md#3-non-negative-stock-via-the-aggregates-own-version--no-new-locking-primitive-closes-h-007-a)
+for the mechanism (the aggregate's own optimistic-concurrency `Version`, per
+[ADR-0011 §2](architecture/ADR-0011-identifiers-and-concurrency.md#2-concurrency-an-explicit-aggregate-version)
+— no new locking primitive). This reverses the S1-era "warn, never block" stock policy for
+inventory movements specifically.
 
-Derived: `PricePerKg = PurchaseAmount / (PurchasedWeightGrams / 1000)`.
+### 3.6 Unit normalization
+A movement may be entered in any unit **compatible** with the supply's own `BaseUnit`
+(kg↔g, L↔mL, m↔cm; `Unit` has no compatible sibling) — the server converts to `BaseUnit` before
+posting, and rejects an incompatible pair (`UNIT_CONVERSION_NOT_SUPPORTED`). See
+[ADR-0017 §4](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md#4-unit-normalization-a-closed-explicit-conversion-table--not-a-general-unit-of-measure-framework) —
+this is a closed, explicit conversion table, not a general unit-of-measure framework.
 
-Registering a lot may (configurable, default **yes**) update `Filament.CurrentPricePerKg` to
-the new lot price and append price history. This is the "last purchase price" policy;
-see [DATA-DICTIONARY](DATA-DICTIONARY.md#filament-price-policy) for the alternatives
-(weighted average is an explicitly deferred option).
+### 3.7 Purchase receipt cost is informational only
+`PurchaseReceipt` captures `UnitCostSnapshot`/`TotalCostSnapshot` (per base unit, converted
+alongside the quantity) purely as history — "what did the last purchase cost." This is **not**
+S4's actual costing policy (FIFO/LIFO/moving-average): that choice remains open, now scoped to all
+of Inventory rather than filament alone (see [DATA-DICTIONARY §5](DATA-DICTIONARY.md#purchase-cost-policy-deferred-to-s4)).
 
-`SupplyLot` is the analogous entity for supplies.
-
-### 3.4 Stock
-
-`StockMovement` (AR, append-only, never edited or deleted):
-`Id`, `MaterialKind {FILAMENT, SUPPLY}`, `MaterialId`, `LotId?`, `Direction {IN, OUT, ADJUSTMENT}`,
-`Quantity` (grams for filament, supply unit for supplies), `OccurredAt`,
-`Reason {PURCHASE, PRODUCTION_CONSUMPTION, MANUAL_ADJUSTMENT, INVENTORY_COUNT, LOSS, RETURN}`,
-`ReferenceType?`, `ReferenceId?`, `UnitCostAtMovement: Money`, `Notes?`.
-
-**Estimated stock** = signed sum of movements.
-**Real stock** is established by a `StockCount` (AR): `Id`, `MaterialKind`, `MaterialId`,
-`CountedAt`, `CountedQuantity`, `SystemQuantityAtCount`, `Notes?` — which emits one
-`ADJUSTMENT` movement for the difference. The count never edits history; it corrects forward.
-
-Stock is **not** a blocking constraint in v1: a quote or production order may be created with
-insufficient stock. The system warns; it does not refuse. (Open decision if this changes.)
+> **Forward-reference note.** Sections below this point (Catalog, Costing, Production, Finance,
+> §15 Domain events) were drafted before S3 and still reference `FilamentId`/`FilamentLot`/
+> `SupplyLot`/`StockMovement`/`MaterialKind`, none of which exist anymore. Every such reference is
+> **stale** and must be reconciled by the sprint that actually builds that module, against `Supply`
+> (optionally carrying `FilamentDetails`) and `InventoryMovement` (§3 above) — see
+> [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md). Left as a note
+> rather than redesigned now, which is out of S3's scope.
 
 ---
 
@@ -666,7 +678,7 @@ Initial keys:
 | `costing.default_wastage_rate` | `0.00` | Costing |
 | `energy.default_tariff_id` | seeded | Energy |
 | `energy.overhead_factor` | `0.00` | Energy |
-| `inventory.filament_price_policy` | `LAST_PURCHASE` | Inventory |
+| `inventory.purchase_cost_policy` | *(not yet seeded — open decision, deferred to S4)* | Inventory/Costing |
 | `ui.default_theme` | `verce-default` | Frontend |
 | `branding.product_name` | `VERCE 3D` | Frontend, documents |
 | `branding.product_subtitle` | `Laboratório de Custos` | Frontend |

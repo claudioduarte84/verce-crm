@@ -70,6 +70,12 @@ public class VerceDbContext : IdentityDbContext<ApplicationUser, ApplicationRole
             .StartsAt(1)
             .IncrementsBy(1);
 
+        // ---- inventory.supply_creation_sequence_seq — same rationale, for the Supply list's
+        // Name-search ordering (S3). ----
+        builder.HasSequence<long>("supply_creation_sequence_seq", "inventory")
+            .StartsAt(1)
+            .IncrementsBy(1);
+
         // ---- Identity tables live in the "platform" schema, renamed per DATA-MODEL §1 ----
         builder.Entity<ApplicationUser>(b =>
         {

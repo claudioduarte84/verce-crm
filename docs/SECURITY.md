@@ -121,7 +121,7 @@ expired one.
 | Role | Can |
 |---|---|
 | `Owner` | Everything, including settings, fee rules, AI configuration, user management |
-| `Operator` | Customers, products, materials, quotes, production, sales, expenses, documents |
+| `Operator` | Customers, products, supplies and inventory, quotes, production, sales, expenses, documents |
 | `Viewer` | Read-only across the app; no exports of full customer lists |
 
 ### 3.2 Mechanism
@@ -332,19 +332,21 @@ Two complementary layers ([ADR-0010](architecture/ADR-0010-audit-strategy.md)):
 
 **1. Business history** — domain tables (`quote_status_history`,
 `production_order_status_history`, `supply_cost_history`, `filament_price_history`,
-`stock_movement`). These are part of the domain: they have meaning, they are shown to the user,
+`inventory_movement`). These are part of the domain: they have meaning, they are shown to the user,
 and reports depend on them.
 
 **2. Generic audit log** — `platform.audit_log`, written by an EF Core `SaveChanges`
 interceptor for entities marked `[Auditable]`. Captures who, what, when, and the changed
 columns with old/new values as JSONB.
 
-Audited entities (v1): `Supply`, `Filament`, `FeeRule*`, `EnergyTariff*`, `Product`,
+Audited entities (v1): `Supply`, `InventoryMovement`, `Filament`, `FeeRule*`, `EnergyTariff*`, `Product`,
 `ProductRecipe`, `Quote*`, `Sale`, `ProductionOrder`, `Expense`, `AppSetting`,
 `DocumentTemplate*`, `AiSettings`, `User`/`Role`.
 
-Explicitly **not** audited: `StockMovement` and `AuditLog` (already append-only — auditing an
-append-only table doubles storage for zero information), and read operations except exports.
+Explicitly **not** audited: `AuditLog` itself (already append-only — auditing an append-only table
+doubles storage for zero information), and read operations except exports. `Supply` and
+`InventoryMovement` are auditable: the latter's immutable ledger facts retain who/when posted
+them through the normal audit interceptor.
 
 Rules:
 - `AiSettings.ApiKeyEncrypted` is audited as *"changed"* with the value replaced by `***`.

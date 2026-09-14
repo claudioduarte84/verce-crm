@@ -10,11 +10,19 @@ public static class Permissions
     public const string CustomersManage = "customers:manage";
     public const string SettingsManage = "settings:manage";
     public const string BrandAssetsManage = "brand-assets:manage";
+    public const string SuppliesRead = "supplies:read";
+    public const string SuppliesManage = "supplies:manage";
+    public const string InventoryRead = "inventory:read";
+    public const string InventoryManage = "inventory:manage";
     public static void AddPolicies(Microsoft.AspNetCore.Authorization.AuthorizationOptions options)
     {
         options.AddPolicy(CustomersRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
         options.AddPolicy(CustomersManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
         options.AddPolicy(SettingsManage, p => p.RequireRole(Roles.Owner));
         options.AddPolicy(BrandAssetsManage, p => p.RequireRole(Roles.Owner));
+        options.AddPolicy(SuppliesRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
+        options.AddPolicy(SuppliesManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
+        options.AddPolicy(InventoryRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
+        options.AddPolicy(InventoryManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
     }
 }

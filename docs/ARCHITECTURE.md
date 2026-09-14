@@ -88,7 +88,7 @@ channels and fee rules belong to **Pricing**.
 |---|---|---|---|
 | 1 | **Customers** | Customer, CustomerAddress | Anything commercial |
 | 2 | **Catalog** | Product, ProductRecipe and its components (BOM), product images | Material master data, prices |
-| 3 | **Inventory** | Supply, SupplyCategory, Filament, FilamentLot, SupplyLot, cost history, StockMovement, StockCount | Product recipes |
+| 3 | **Inventory** | Supply (optionally carrying FilamentDetails), SupplyCategory, InventoryMovement (append-only ledger) | Product recipes, actual costing policy |
 | 4 | **Costing** | CostEngine, CostBreakdown, CostExperiment (Laboratory), cost snapshots | Selling price |
 | 5 | **Pricing** | SalesChannel, FeeRule, FeeRuleVersion, PriceBracket, PricingEngine | Cost computation |
 | 6 | **Quoting** | Quote, QuoteRevision, QuoteItem, snapshots, status history, numbering | Production, sales |
@@ -244,9 +244,12 @@ already separated, so extracting a module means extracting its schema.
   Children are always loaded and modified **through their root** — repositories expose roots,
   never child sets — which is what makes the bump reliable.
 - **Soft delete** (`deleted_at timestamptz null`, global query filter) only on master data
-  referenced by history: Customer, Product, Supply, Filament, SalesChannel, Machine,
-  ExpenseCategory, DocumentTemplate. Master data additionally has `is_active` for
-  "no longer offered but not deleted".
+  referenced by history: Customer, Product, SalesChannel, Machine, ExpenseCategory,
+  DocumentTemplate. Master data additionally has `is_active` for "no longer offered but not
+  deleted". **`Supply` is the one exception**: it has `active` but no `deleted_at` — deactivation
+  alone is sufficient since nothing about a supply's own row needs to distinguish "deleted" from
+  "deactivated" (unlike master data referenced by a snapshot elsewhere). See
+  [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md).
 - **Transactional records are never deleted**: Quote, QuoteRevision, Sale, ProductionOrder,
   StockMovement, Expense, AuditLog, GeneratedDocument. They are canceled, never removed.
 - **Application-owned domain and master-data tables** carry `created_at`, `created_by`,

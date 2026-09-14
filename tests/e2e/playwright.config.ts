@@ -50,8 +50,11 @@ export default defineConfig({
   projects: [
     { name: 'setup', testMatch: /auth\.setup\.ts/, use: { ...devices['Desktop Chrome'] } },
     { name: 'operator-setup', dependencies: ['setup'], testMatch: /operator\.setup\.ts/, use: { ...devices['Desktop Chrome'] } },
+    { name: 'viewer-setup', dependencies: ['operator-setup'], testMatch: /viewer\.setup\.ts/, use: { ...devices['Desktop Chrome'] } },
     { name: 'authorization', dependencies: ['operator-setup'], testMatch: /s2-authorization\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'operator.json') } },
-    { name: 'chromium', dependencies: ['operator-setup'], testIgnore: /auth\.setup\.ts|operator\.setup\.ts|s2-authorization\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'auth.json') } },
+    { name: 'supplies-operator', dependencies: ['viewer-setup'], testMatch: /s3-supplies-operator\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'operator.json') } },
+    { name: 'supplies-viewer', dependencies: ['viewer-setup'], testMatch: /s3-supplies-viewer\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'viewer.json') } },
+    { name: 'chromium', dependencies: ['viewer-setup'], testIgnore: /auth\.setup\.ts|operator\.setup\.ts|viewer\.setup\.ts|s2-authorization\.spec\.ts|s3-supplies-operator\.spec\.ts|s3-supplies-viewer\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'auth.json') } },
   ],
   webServer: [
     {

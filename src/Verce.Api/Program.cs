@@ -9,6 +9,7 @@ using Verce.Api.Auth;
 using Verce.Api.Authorization;
 using Verce.Api.Cli;
 using Verce.Api.Customers;
+using Verce.Api.Inventory;
 using Verce.Api.Outbox;
 using Verce.Api.Settings;
 using Verce.Platform.Identity;
@@ -52,6 +53,7 @@ builder.Services.Configure<Verce.Modules.Settings.BrandAssetStorageOptions>(opti
 builder.Services.AddScoped<Verce.Modules.Settings.AppSettingValueReader>();
 builder.Services.AddScoped<Verce.Modules.Settings.BrandAssetStorage>();
 builder.Services.AddHostedService<Verce.Modules.Settings.SettingsSeedService>();
+builder.Services.AddHostedService<Verce.Modules.Inventory.InventorySeedService>();
 
 // ---- Authentication: same-origin cookie, no bearer/JWT (ADR-0009 §1, SECURITY §2) ----
 // The cookie scheme(s) must be explicitly ADDED, not merely configured — ConfigureApplicationCookie
@@ -165,6 +167,7 @@ app.MapAuthEndpoints();
 app.MapOutboxAdminEndpoints();
 app.MapCustomerEndpoints();
 app.MapSettingsEndpoints();
+app.MapSupplyEndpoints();
 
 // ---- Health endpoints (ADR-0012 §25, OPERATIONS §9): status word only, anonymous ----
 app.MapGet("/health/live", () => Results.Text("healthy")).AllowAnonymous();

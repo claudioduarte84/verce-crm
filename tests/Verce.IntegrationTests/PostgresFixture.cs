@@ -1,8 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Testcontainers.PostgreSql;
 using Verce.Platform.Persistence;
-using Verce.Modules.Customers;
-using Verce.Modules.Settings;
 
 namespace Verce.IntegrationTests;
 
@@ -19,8 +17,12 @@ public sealed class PostgresFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         // The production composition root supplies module-owned configurations. Direct test
-        // contexts must compose the same model before migrating from zero.
-        VerceDbContext.ConfigureModuleAssemblies([typeof(CustomersModuleMarker).Assembly, typeof(SettingsModuleMarker).Assembly]);
+        // contexts must compose the EXACT SAME model before migrating from zero, or this
+        // fixture's model disagrees with the latest migration's baked-in snapshot and
+        // MigrateAsync fails with PendingModelChangesWarning — so this reuses the composition
+        // root's own catalog rather than a hand-maintained module list that silently drifts
+        // behind it every time a future sprint adds real configurations to a new module.
+        VerceDbContext.ConfigureModuleAssemblies(Verce.Api.ModuleAssemblyCatalog.All);
         _container = new PostgreSqlBuilder("postgres:17-alpine")
             .WithDatabase("verce_test")
             .WithUsername("verce")

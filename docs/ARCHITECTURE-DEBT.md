@@ -57,7 +57,7 @@ row unresolved has not met its Definition of Done, and the reviewer should rejec
 | **H-004** | Pricing | `PER_ORDER` fixed-fee allocation: rounding of `fixedFee / quantity` across lines, residual-cent assignment, behaviour when quantity changes on a revision | S5 | S5 | Open |
 | **H-005** | Pricing | Interaction of manual price override, item discount and bracket resolution: precedence, whether an override re-resolves the bracket, how effective margin is reported when all three apply | S5 | S5 | Open |
 | **H-006** | Costing / Production | Actual total cost composition: manual lines with no actual counterpart, partial reconciliation, failed units, exact exclusion of wastage from the actual side | **Before S10** | S11 | Open |
-| **H-007 A** | Inventory | Stock movement sign convention and `StockCount` concurrency (two counts of one material racing) | S3 | S3 | Open |
+| **H-007 A** | Inventory | Stock movement sign convention and `StockCount` concurrency (two counts of one material racing) | S3 | S3 | **Closed (S3)** — see [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) §1, §3 |
 | **H-007 B** | Inventory / Production | Actual-consumption idempotency: preventing a production item's consumption being recorded twice | S11 | S11 | Open |
 | **H-008 A** | Finance | Expense / double-count model: treatment boundaries and prevention of operator misclassification | S8 | S8 | Open |
 | **H-008 B** | Reporting | Cash Result vs Product Margin consistency across every report surface | **Before S12** | S12 | Open |
@@ -89,7 +89,7 @@ the product asks for them.
 
 | Item | Where decided | Note |
 |---|---|---|
-| Weighted-average filament costing | [DATA-DICTIONARY](DATA-DICTIONARY.md#filament-price-policy) | Needs per-lot consumption tracking the shop floor does not record |
+| Weighted-average inventory costing | [DATA-DICTIONARY](DATA-DICTIONARY.md#purchase-cost-policy-deferred-to-s4) | Needs per-movement consumption tracking the shop floor does not record yet; S3 generalized this from filament-only to all of Inventory ([ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) §5) |
 | Global quote-level discount | [CR-08.2](CALCULATION-RULES.md) | Would need allocation back to items; a second rounding source |
 | Production change orders (partial amendment) | [STATE-MACHINES §3](STATE-MACHINES.md#3-altering-an-approved-quote) | v1 blocks with `PRODUCTION_ORDER_IN_PROGRESS` |
 | Item-level technical highlights | [DOMAIN-MODEL §8](DOMAIN-MODEL.md#8-quoting-module) | v1 holds them at revision level |

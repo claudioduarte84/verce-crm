@@ -854,6 +854,463 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/supplies/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyCategoryResponse"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/supplies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    search?: string;
+                    categoryCode?: string;
+                    lowStock?: boolean;
+                    status?: components["schemas"]["SupplyListStatus"];
+                    page?: number | string;
+                    pageSize?: number | string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyListResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SupplyCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/supplies/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SupplyUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyResponse"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/supplies/{id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query: {
+                    version: number | string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/supplies/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query: {
+                    version: number | string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/supplies/{id}/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InventorySummaryResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/supplies/{id}/inventory/movements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    page?: number | string;
+                    pageSize?: number | string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InventoryMovementListResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/supplies/{id}/inventory/initial-balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["InitialBalanceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/supplies/{id}/inventory/purchase-receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PurchaseReceiptRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/supplies/{id}/inventory/adjustment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["InventoryAdjustmentRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1054,14 +1511,124 @@ export interface components {
             version: number | string;
             addresses: components["schemas"]["AddressResponse"][];
         };
+        FilamentDetailsRequest: {
+            materialType: components["schemas"]["FilamentMaterialType"];
+            brand: string;
+            colorName: string;
+            colorCode: null | string;
+            /** Format: double */
+            diameterMm: number | string;
+            /** Format: double */
+            spoolNetWeightGrams: number | string;
+        };
+        FilamentDetailsResponse: {
+            materialType: components["schemas"]["FilamentMaterialType"];
+            brand: string;
+            colorName: string;
+            colorCode: null | string;
+            /** Format: double */
+            diameterMm: number | string;
+            /** Format: double */
+            spoolNetWeightGrams: number | string;
+        };
+        /** @enum {unknown} */
+        FilamentMaterialType: "Pla" | "PlaPlus" | "Petg" | "Abs" | "Asa" | "Tpu" | "Nylon" | "Pc" | "Pva" | "Other";
         /** Format: binary */
         IFormFile: string;
+        InitialBalanceRequest: {
+            /** Format: double */
+            quantity: number | string;
+            enteredUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: date-time */
+            occurredAt: string;
+            reference: null | string;
+            notes: null | string;
+            /** Format: int64 */
+            supplyVersion: number | string;
+        };
+        /** @enum {unknown} */
+        InventoryAdjustmentKind: "Increase" | "Decrease" | "Correction";
+        InventoryAdjustmentRequest: {
+            kind: components["schemas"]["InventoryAdjustmentKind"];
+            /** Format: double */
+            quantity: number | string;
+            enteredUnit: components["schemas"]["SupplyBaseUnit"];
+            reason: string;
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: int64 */
+            supplyVersion: number | string;
+        };
+        InventoryMovementListResponse: {
+            items: components["schemas"]["InventoryMovementResponse"][];
+            /** Format: int32 */
+            page: number | string;
+            /** Format: int32 */
+            pageSize: number | string;
+            /** Format: int32 */
+            total: number | string;
+        };
+        InventoryMovementResponse: {
+            /** Format: uuid */
+            id: string;
+            type: components["schemas"]["InventoryMovementType"];
+            /** Format: double */
+            enteredQuantity: number | string;
+            enteredUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: double */
+            quantityDeltaBaseUnit: number | string;
+            baseUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: date-time */
+            occurredAt: string;
+            reason: null | string;
+            reference: null | string;
+            supplier: null | string;
+            /** Format: double */
+            unitCostSnapshot: null | number | string;
+            /** Format: double */
+            totalCostSnapshot: null | number | string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /** @enum {unknown} */
+        InventoryMovementType: "PurchaseReceipt" | "ManualIncrease" | "ManualDecrease" | "Consumption" | "ReturnIn" | "ReturnOut" | "InitialBalance" | "Correction";
+        InventorySummaryResponse: {
+            /** Format: uuid */
+            supplyId: string;
+            baseUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: double */
+            currentStockBaseUnit: number | string;
+            /** Format: double */
+            minimumStock: null | number | string;
+            isLowStock: boolean;
+            /** Format: double */
+            latestPurchaseUnitCost: null | number | string;
+            hasRecordedMovement: boolean;
+            /** Format: int64 */
+            supplyVersion: number | string;
+        };
         LoginRequest: {
             email: string;
             password: string;
         };
         /** @enum {unknown} */
         PersonType: "Individual" | "Company";
+        PurchaseReceiptRequest: {
+            /** Format: double */
+            quantity: number | string;
+            enteredUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: double */
+            unitCost: null | number | string;
+            /** Format: double */
+            totalCost: null | number | string;
+            supplier: null | string;
+            reference: null | string;
+            notes: null | string;
+            /** Format: int64 */
+            supplyVersion: number | string;
+        };
         RequeueOutboxMessageRequest: {
             reason: string;
         };
@@ -1073,6 +1640,89 @@ export interface components {
         SetupAccountRequest: {
             token: string;
             password: string;
+        };
+        /** @enum {unknown} */
+        SupplyBaseUnit: "Gram" | "Kilogram" | "Unit" | "Milliliter" | "Liter" | "Meter" | "Centimeter";
+        SupplyCategoryResponse: {
+            code: string;
+            name: string;
+            isActive: boolean;
+        };
+        SupplyCreateRequest: {
+            code: string;
+            name: string;
+            description: null | string;
+            categoryCode: string;
+            baseUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: double */
+            minimumStock: null | number | string;
+            preferredSupplier: null | string;
+            notes: null | string;
+            filament: null | components["schemas"]["FilamentDetailsRequest"];
+        };
+        SupplyListItemResponse: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            categoryCode: string;
+            baseUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: double */
+            currentStockBaseUnit: number | string;
+            /** Format: double */
+            minimumStock: null | number | string;
+            isLowStock: boolean;
+            /** Format: double */
+            latestPurchaseUnitCost: null | number | string;
+            active: boolean;
+            /** Format: int64 */
+            version: number | string;
+        };
+        SupplyListResponse: {
+            items: components["schemas"]["SupplyListItemResponse"][];
+            /** Format: int32 */
+            page: number | string;
+            /** Format: int32 */
+            pageSize: number | string;
+            /** Format: int32 */
+            total: number | string;
+        };
+        /** @enum {unknown} */
+        SupplyListStatus: "active" | "inactive" | "all";
+        SupplyResponse: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            description: null | string;
+            categoryCode: string;
+            baseUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: double */
+            minimumStock: null | number | string;
+            preferredSupplier: null | string;
+            notes: null | string;
+            active: boolean;
+            /** Format: double */
+            currentStockBaseUnit: number | string;
+            /** Format: double */
+            latestPurchaseUnitCost: null | number | string;
+            isLowStock: boolean;
+            hasRecordedMovement: boolean;
+            filament: null | components["schemas"]["FilamentDetailsResponse"];
+            /** Format: int64 */
+            version: number | string;
+        };
+        SupplyUpdateRequest: {
+            name: string;
+            description: null | string;
+            categoryCode: string;
+            /** Format: double */
+            minimumStock: null | number | string;
+            preferredSupplier: null | string;
+            notes: null | string;
+            filament: null | components["schemas"]["FilamentDetailsRequest"];
+            /** Format: int64 */
+            version: number | string;
         };
     };
     responses: never;

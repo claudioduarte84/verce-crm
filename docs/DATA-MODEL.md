@@ -13,8 +13,8 @@ Conventions ([ADR-0001](architecture/ADR-0001-system-architecture.md),
   | Category | PK | Classified by | Examples here |
   |---|---|---|---|
   | **Domain entity** — independent domain identity/lifecycle | `id uuid` (UUID v7) | `IDomainEntity` | `customer`, `quote`, `product`, `sale`, `expense`, `audit_log` |
-  | **Master data** — operator-managed catalogues | `id uuid` (UUID v7) | `IMasterData` | `supply_category`, `product_category`, `expense_category`, `filament_material`, `filament_brand`, `sales_channel`, `machine`, `energy_tariff` |
-  | **Reference data** — closed, system-owned enumeration | stable textual `code` | `IReferenceData` | `document_type`, `brand_asset_type` |
+  | **Master data** — operator-managed catalogues | `id uuid` (UUID v7) | `IMasterData` | `product_category`, `expense_category`, `sales_channel`, `machine`, `energy_tariff` |
+  | **Reference data** — closed, system-owned enumeration | stable textual `code` | `IReferenceData` | `document_type`, `brand_asset_type`, `supply_category` |
   | **Technical / framework** | whatever the algorithm or framework needs | `ITechnicalTable`, or the technical registry for framework-owned types | `quote_number_counter`, `outbox_message`, `data_protection_keys`, Identity, Quartz |
   | **Join table** — identity *is* the relationship | composite FK pair | `IJoinTable` | none yet |
 
@@ -35,7 +35,7 @@ Conventions ([ADR-0001](architecture/ADR-0001-system-architecture.md),
   > `data_protection_keys` are **not** altered to add these columns: mutating a framework table
   > to satisfy an architectural slogan risks breaking the framework's own migrations for no
   > benefit. Append-only tables that record their own instant (`audit_log.occurred_at`,
-  > `stock_movement.occurred_at`, `outbox_message_attempt.started_at`) do not duplicate it.
+  > `inventory_movement.occurred_at`, `outbox_message_attempt.started_at`) do not duplicate it.
   > The **business** audit trail is `platform.audit_log` plus the interceptor
   > ([ADR-0010](architecture/ADR-0010-audit-strategy.md)) — not these convenience columns.
 - **Concurrency: `version bigint not null default 1` on every aggregate root**, mapped as the EF
@@ -417,105 +417,89 @@ database on insert, may contain rollback gaps and are never reused. The canonica
 
 ## 4. `inventory` schema
 
-### `inventory.supply_category`
-`id` **PK**, `name` **U**, `kind text` **CHECK** (`CONSUMABLE|COMPONENT|PACKAGING|LABEL|ACCESSORY|OTHER`),
-`is_active boolean`.
+> **S3 supersedes the schema previously documented here** (a separate `Filament` aggregate with
+> per-lot cost history and a `StockMovement`/`StockCount` pair keyed by a polymorphic
+> `MaterialKind`). See [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md)
+> for why; what follows is the schema actually migrated in `AddS3SuppliesAndInventory`.
 
-### `inventory.supply` — **SD**
+### `inventory.supply_category` — Category 3 reference data
 | Column | Type | Notes |
 |---|---|---|
-| id | uuid | **PK** |
-| code | text | null, **U** partial where not null and not deleted |
-| name | text | not null |
-| supply_category_id | uuid | **FK** restrict |
-| unit | text | **CHECK** in the `SupplyUnit` set |
-| current_unit_cost | numeric(18,6) | not null, **CHECK** `>= 0` |
-| description | text | null |
-| tracks_stock | boolean | not null default true |
+| code | varchar(40) | **PK** (`FILAMENT`, `RESIN`, `PACKAGING`, `HARDWARE`, `ELECTRONICS`, `FINISHING`, `CONSUMABLE`, `OTHER`) |
+| name | varchar(100) | not null |
 | is_active | boolean | not null |
-| deleted_at | timestamptz | null |
 
-**IX** `(supply_category_id)`, `gin (name gin_trgm_ops)`.
+Seeded idempotently at startup by `InventorySeedService`, mirroring `SettingsSeedService`'s
+gate (`Settings:SeedOnStartup` config + no-pending-migrations check).
 
-### `inventory.supply_cost_history`
-`id` **PK**, `supply_id` **FK**, `unit_cost numeric(18,6)`, `valid_from date not null`,
-`valid_until date null`, `source text` (`MANUAL|PURCHASE|IMPORT`), `source_lot_id uuid null`,
-`notes`.
-
-- **EXCLUDE USING gist** `(supply_id WITH =, daterange(valid_from, valid_until, '[)') WITH &&)`
-  — windows for one supply can never overlap.
-- **IX** `(supply_id, valid_from desc)`.
-
-### `inventory.filament_material`, `inventory.filament_brand`
-Lookup tables: `id` **PK**, `name` **U**, `is_active`. Materials are data, not a C# enum, so
-adding PETG-CF requires no deploy.
-
-### `inventory.filament` — **SD**
+### `inventory.supply` — **SD** (Category 1 domain entity, aggregate root)
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid | **PK** |
-| filament_material_id | uuid | **FK** restrict |
-| filament_brand_id | uuid | **FK** restrict |
-| commercial_name | text | not null (e.g. "Preto Eclipse") |
-| color_name | text | not null |
-| color_hex | char(7) | null |
-| diameter | text | **CHECK** `MM_175` / `MM_285` |
-| current_price_per_kg | numeric(18,6) | not null, **CHECK** `> 0` |
-| density_g_cm3 | numeric(8,4) | null |
-| notes | text | null |
-| is_active | boolean | not null |
-| deleted_at | timestamptz | null |
+| code | varchar(40) | not null, **U**, immutable after creation |
+| name | varchar(200) | not null |
+| description | varchar(2000) | null |
+| category_code | varchar(40) | **FK** restrict → `supply_category.code` |
+| base_unit | varchar(16) | not null, **CHECK** ∈ `SupplyBaseUnit`, immutable after creation |
+| minimum_stock | numeric(14,4) | null |
+| preferred_supplier | varchar(200) | null |
+| notes | varchar(2000) | null |
+| active | boolean | not null |
+| current_stock_base_unit | numeric(14,4) | not null; **cached projection**, written only alongside a movement insert (§4.5) |
+| latest_purchase_unit_cost | numeric(18,6) | null; informational snapshot (§4.7), not a costing policy |
+| has_recorded_movement | boolean | not null; gates the one-time initial balance |
+| filament_material_type | varchar(16) | null, **CHECK** ∈ `FilamentMaterialType` when present |
+| filament_brand | varchar(100) | null |
+| filament_color_name | varchar(100) | null |
+| filament_color_code | varchar(20) | null |
+| filament_diameter_mm | numeric(6,4) | null |
+| filament_spool_net_weight_grams | numeric(12,3) | null |
+| creation_sequence | bigint | shadow-only, never in DTOs/OpenAPI — final pagination tie-breaker, same pattern as `customer.creation_sequence` (ADR-0011 §1.2.1) |
+| created_at / created_by | timestamptz / uuid | via `[Auditable]` |
+| updated_at / updated_by | timestamptz / uuid | via `[Auditable]`, null until first update |
+| version | bigint | not null; optimistic-concurrency token (ADR-0011 §2) — the same token that makes non-negative-stock concurrency work (ADR-0017 §3) |
 
-**U** partial `(filament_material_id, filament_brand_id, commercial_name, color_name, diameter)
-WHERE deleted_at IS NULL`.
-**IX** `gin ((commercial_name || ' ' || color_name) gin_trgm_ops)`.
+The six `filament_*` columns are **scalar, not an EF owned type** — see ADR-0017 §7. All six are
+null for a non-filament supply.
 
-### `inventory.filament_price_history`
-Same shape and same exclusion constraint as `supply_cost_history`, keyed by `filament_id`,
-column `price_per_kg numeric(18,6)`.
+**IX** `(code)` unique, `(creation_sequence)` unique, `(active)`, `(category_code)`,
+`gin (name gin_trgm_ops)`.
 
-### `inventory.filament_lot`
-`id` **PK**, `filament_id` **FK**, `lot_code text null`, `purchased_at date not null`,
-`purchased_weight_grams numeric(12,3) not null CHECK > 0`,
-`purchase_amount numeric(18,2) not null CHECK >= 0`, `supplier_name text null`,
-`notes text null`.
-Derived `price_per_kg` is **not stored** — it is `purchase_amount / (purchased_weight_grams/1000)`,
-exposed as a generated column `price_per_kg numeric(18,6) GENERATED ALWAYS AS (...) STORED`
-so reports can index it.
-**IX** `(filament_id, purchased_at desc)`.
-
-### `inventory.supply_lot`
-Analogous: `supply_id`, `purchased_quantity numeric(14,4)`, `purchase_amount`, `purchased_at`,
-`lot_code`, `supplier_name`, generated `unit_cost numeric(18,6)`.
-
-### `inventory.stock_movement` — append-only
+### `inventory.inventory_movement` — append-only (*E* of `supply`, `IOwnedBy<Supply>`)
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid | **PK** |
-| material_kind | text | **CHECK** `FILAMENT` / `SUPPLY` |
-| material_id | uuid | polymorphic, **no FK** (see note) |
-| lot_id | uuid | null |
-| direction | text | **CHECK** `IN` / `OUT` / `ADJUSTMENT` |
-| quantity | numeric(14,4) | signed; grams for filament |
-| unit_cost_at_movement | numeric(18,6) | not null |
+| supply_id | uuid | **FK** restrict → `supply.id` |
+| type | varchar(16) | not null, **CHECK** ∈ `PurchaseReceipt, ManualIncrease, ManualDecrease, Consumption, ReturnIn, ReturnOut, InitialBalance, Correction` |
+| entered_quantity | numeric(18,8) | not null; immutable operator-entered fact, canonicalized to eight decimal places |
+| entered_unit | varchar(16) | not null, **CHECK** ∈ `SupplyBaseUnit`; immutable operator-entered unit |
+| quantity_delta_base_unit | numeric(14,4) | not null, **signed** — positive for increases, negative for decreases |
 | occurred_at | timestamptz | not null |
-| reason | text | **CHECK** enumerated |
-| reference_type | text | null (`PRODUCTION_ORDER_ITEM`, `FILAMENT_LOT`, `STOCK_COUNT`) |
-| reference_id | uuid | null |
-| notes | text | null |
+| reason | varchar(1000) | null |
+| reference | varchar(200) | null |
+| supplier | varchar(200) | null |
+| unit_cost_snapshot | numeric(18,6) | null |
+| total_cost_snapshot | numeric(18,2) | null |
+| created_at / created_by | timestamptz / uuid | via `[Auditable]` — "posted at/by" for a ledger row |
+| updated_at / updated_by | timestamptz / uuid | via `[Auditable]`; never populated — movements are never updated |
 
-**IX** `(material_kind, material_id, occurred_at desc)`, `(reference_type, reference_id)`.
+**IX** `(supply_id, occurred_at)`. `entered_quantity`/`entered_unit` preserve what the operator
+reported, while `quantity_delta_base_unit` is the separately authoritative normalized stock delta.
+No `Update`/`Delete` endpoint or domain method exists for this
+table — a correction is a new row, never an edit of an existing one.
 
-*Polymorphic FK note:* `material_id` cannot have a declarative FK because it targets two
-tables. This is the one place the design accepts a soft reference. It is protected by
-(a) a `CHECK` pairing `material_kind` with the allowed `reference_type` values, and
-(b) an integration test asserting every `material_id` resolves. The alternative — two nullable
-FK columns with a XOR check — was rejected because it makes every stock query branch.
+`Consumption`, `ReturnIn`, `ReturnOut` are valid per the `CHECK` constraint (so a later sprint's
+migration does not need to widen it) but are not producible by any S3 endpoint.
 
-### `inventory.stock_count`
-`id` **PK**, `material_kind`, `material_id`, `counted_at timestamptz`,
-`counted_quantity numeric(14,4)`, `system_quantity_at_count numeric(14,4)`,
-`adjustment_movement_id uuid` **FK**→stock_movement, `notes`.
+> **Forward-reference note for later sections.** Sections below this point (Catalog, Costing,
+> Production, Finance, Reporting) were drafted before S3 and still reference a pre-S3 inventory
+> shape that no longer exists: `inventory.filament`, `inventory.filament_lot`,
+> `inventory.supply_lot`, `inventory.stock_movement`, `inventory.stock_count`, and the
+> `material_kind` discriminator. Every such reference is **stale** and must be reconciled by the
+> sprint that actually builds that module, against the real S3 shapes above
+> (`inventory.supply`, `inventory.supply_category`, `inventory.inventory_movement`) and
+> [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md). This note is left
+> here deliberately rather than redesigning those unbuilt modules now, which is out of S3's scope.
 
 ---
 

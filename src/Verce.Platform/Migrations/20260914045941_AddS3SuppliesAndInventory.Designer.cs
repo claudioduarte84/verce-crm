@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Verce.Platform.Persistence;
@@ -11,9 +12,11 @@ using Verce.Platform.Persistence;
 namespace Verce.Platform.Migrations
 {
     [DbContext(typeof(VerceDbContext))]
-    partial class VerceDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260914045941_AddS3SuppliesAndInventory")]
+    partial class AddS3SuppliesAndInventory
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -479,7 +482,6 @@ namespace Verce.Platform.Migrations
                     b.ToTable("inventory_movement", "inventory", t =>
                         {
                             t.HasCheckConstraint("ck_inventory_movement_entered_unit", "entered_unit IN ('Gram', 'Kilogram', 'Unit', 'Milliliter', 'Liter', 'Meter', 'Centimeter')");
-
                             t.HasCheckConstraint("ck_inventory_movement_type", "type IN ('PurchaseReceipt', 'ManualIncrease', 'ManualDecrease', 'Consumption', 'ReturnIn', 'ReturnOut', 'InitialBalance', 'Correction')");
                         });
                 });
@@ -630,7 +632,6 @@ namespace Verce.Platform.Migrations
                     b.ToTable("supply", "inventory", t =>
                         {
                             t.HasCheckConstraint("ck_supply_base_unit", "base_unit IN ('Gram', 'Kilogram', 'Unit', 'Milliliter', 'Liter', 'Meter', 'Centimeter')");
-
                             t.HasCheckConstraint("ck_supply_filament_material_type", "filament_material_type IS NULL OR filament_material_type IN ('Pla', 'PlaPlus', 'Petg', 'Abs', 'Asa', 'Tpu', 'Nylon', 'Pc', 'Pva', 'Other')");
                         });
                 });

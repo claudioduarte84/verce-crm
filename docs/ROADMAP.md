@@ -270,17 +270,38 @@ and leaves the previous file untouched**; a `.exe` renamed to `.png` is rejected
 
 ---
 
-## S3 — Supplies & Filaments
+## S3 — Supplies & Inventory
 
-- `Supply` with unit, category, current cost; `SupplyCostHistory` with the non-overlap
-  exclusion constraint; cost changes only through the domain method.
-- `Filament` with material/brand/name/color/diameter; `FilamentPriceHistory`; `FilamentLot`
-  with the generated `price_per_kg`; the `LAST_PURCHASE` price policy.
-- `StockMovement` (append-only), `StockCount` with adjustment movement, estimated stock query.
-- UI: material lists with search, cost history timeline, lot registration.
+> **Delivered scope differs from the plan originally drafted here.** The mission actually
+> executed for S3 generalized quantities/units across every supply (not filament grams only) and
+> made non-negative stock a hard invariant instead of history-tracked cost — see
+> [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) for the full
+> reasoning and [DOMAIN-MODEL §3](DOMAIN-MODEL.md#3-inventory-module) for the model as built. What
+> follows reflects the actual delivery, not the original plan (which modeled Filament as its own
+> aggregate with lot-based cost history).
 
-**Exit (critical test):** changing a supply cost or a filament price appends history and leaves
-the previous value resolvable for any past instant.
+- `Supply` (Category 1 aggregate root): code, name, category, base unit, minimum stock, active
+  flag, optional `FilamentDetails`, cached current stock, cached latest purchase unit cost.
+- `SupplyCategory` (Category 3 reference data, seeded): `FILAMENT`, `RESIN`, `PACKAGING`,
+  `HARDWARE`, `ELECTRONICS`, `FINISHING`, `CONSUMABLE`, `OTHER`.
+- `InventoryMovement` (append-only ledger, child of `Supply`): initial balance (once), purchase
+  receipt (with unit conversion and a cost snapshot — informational only, not a costing policy),
+  manual increase/decrease, and count-based correction. Non-negative stock enforced via the
+  aggregate's own optimistic-concurrency `Version` — no new locking primitive.
+- Unit normalization: a closed, explicit conversion table (kg↔g, L↔mL, m↔cm), not a general
+  unit-of-measure framework.
+- UI: supply list with search/category/active/low-stock filters and pagination; create/edit form
+  with conditional filament fields; inventory detail with stock, low-stock state, latest cost and
+  movement history; initial-balance, purchase-receipt and manual-adjustment actions.
+
+**What S3 explicitly did not build** (deferred, per the mission's own scope boundary): per-lot
+stock tracking, a filament/supply cost-history table, an actual costing policy
+(FIFO/LIFO/weighted-average — S4), recipes/consumption (S5+), and quote/production stock blocking
+(unchanged from v1's warn-only behaviour).
+
+**Exit (critical test):** a decrease larger than current stock is rejected and stock never goes
+negative, including under two genuinely concurrent requests against the same supply (proven
+against a real PostgreSQL host, not mocked).
 
 ---
 

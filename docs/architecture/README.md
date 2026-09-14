@@ -46,6 +46,7 @@ its own work; a different model reviews this delivery.
 | [0014](ADR-0014-frontend-architecture-and-theming.md) | Frontend Architecture and Theming | Accepted | Frontend never computes money; themes are token sets, never behaviour |
 | [0015](ADR-0015-brand-assets-and-application-branding.md) | Brand Assets and Application Branding | Accepted | Versioned assets; documents reference the version; eight-stage upload pipeline; no SVG in v1 |
 | [0016](ADR-0016-document-render-snapshots.md) | Document Render Snapshots and Immutability | Accepted | Layout, branding and content frozen at issue; issued documents never regenerated |
+| [0017](ADR-0017-inventory-ledger-and-unit-normalization.md) | Inventory Ledger, Non-Negative Stock Concurrency, and Unit Normalization | Accepted (pending external review) | Append-only signed-delta ledger; non-negative stock via the aggregate's own `Version` (H-007 A); closed unit conversion table; Filament is optional `Supply` metadata, not a separate aggregate |
 
 ## Template
 

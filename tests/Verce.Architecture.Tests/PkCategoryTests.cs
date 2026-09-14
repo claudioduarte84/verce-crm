@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Verce.Api;
 using Verce.Modules.Customers;
+using Verce.Modules.Inventory;
 using Verce.Modules.Settings;
 using Verce.Platform.Persistence;
 using Verce.SharedKernel.Domain;
@@ -182,6 +183,56 @@ public class PkCategoryTests
             context.Model.FindEntityType(entityType).Should().NotBeNull(
                 $"the PK-category model must include the production {entityType.FullName} entity");
         }
+    }
+
+    [Fact]
+    public void Full_application_model_contains_the_required_S3_inventory_entity_inventory()
+    {
+        using var context = BuildContext();
+        var expectedEntityTypes = new[]
+        {
+            typeof(Supply),
+            typeof(InventoryMovement),
+            typeof(SupplyCategory),
+        };
+
+        foreach (var entityType in expectedEntityTypes)
+        {
+            context.Model.FindEntityType(entityType).Should().NotBeNull(
+                $"the PK-category model must include the production {entityType.FullName} entity");
+        }
+    }
+
+    [Fact]
+    public void SupplyCategory_is_Category_3_reference_data_with_a_textual_code_primary_key()
+    {
+        using var context = BuildContext();
+        var entityType = context.Model.FindEntityType(typeof(SupplyCategory));
+
+        typeof(SupplyCategory).Should().BeAssignableTo<IReferenceData>();
+        typeof(SupplyCategory).Should().NotBeAssignableTo<IDomainEntity>();
+        typeof(SupplyCategory).Should().NotBeAssignableTo<IAggregateRoot>();
+
+        entityType.Should().NotBeNull();
+        var primaryKey = entityType!.FindPrimaryKey();
+        primaryKey.Should().NotBeNull();
+        primaryKey!.Properties.Should().ContainSingle();
+        primaryKey.Properties[0].Name.Should().Be(nameof(SupplyCategory.Code));
+        primaryKey.Properties[0].ClrType.Should().Be(typeof(string));
+    }
+
+    [Fact]
+    public void Supply_FilamentDetails_is_not_registered_as_a_separate_EF_entity_type()
+    {
+        // Regression: an EF `OwnsOne` owned type is itself an "entity type" in the model and
+        // would need its own PK-category marker for a concept that has no independent identity
+        // at all — it is display/selection metadata embedded on ONE Supply row (S3 mission §10).
+        // Supply maps the filament columns as individual scalar fields instead and exposes them
+        // through a plain, EF-ignored computed property — this pins that choice down so a future
+        // change doesn't silently reintroduce the owned-type registration.
+        using var context = BuildContext();
+        context.Model.FindEntityType(typeof(Verce.Modules.Inventory.FilamentDetails)).Should().BeNull(
+            "FilamentDetails must never be registered as its own EF entity type");
     }
 
     [Fact]

@@ -448,39 +448,65 @@ marginVariance = realizedMargin - effectiveMarginAtQuote
 
 ---
 
-## 10. Filament price derivation
+## 10. Purchase cost derivation *(implemented S3, as an informational snapshot — not yet a costing policy)*
 
-### CR-10.1 — Lot price
-```
-lotPricePerKg = round6( purchaseAmount / (purchasedWeightGrams / 1000) )
-```
-Example: R$ 89,90 for 1000 g → R$ 89,900000/kg.
+> **Supersedes the original per-lot design below.** S3 delivered `Supply`/`InventoryMovement`
+> instead of a `Filament`/`FilamentLot` pair — see
+> [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) §5–6. There is no
+> `FilamentPriceHistory` and no configurable price policy yet; what S3 actually computes is:
 
-### CR-10.2 — Current price policy (`inventory.filament_price_policy`)
+### CR-10.1 — Purchase receipt unit cost (implemented)
 ```
-LAST_PURCHASE (default) → currentPricePerKg = most recent lot's lotPricePerKg
-MANUAL                  → currentPricePerKg is set by the operator; lots do not change it
-WEIGHTED_AVERAGE        → reserved, not implemented in v1
+only UnitCost: totalCost = roundMoney(UnitCost × enteredQuantity)
+only TotalCost: unitCostSnapshot(baseUnit) = roundInternal(TotalCost / normalizedBaseQuantity)
+both supplied: roundMoney(UnitCost × enteredQuantity) must equal roundMoney(TotalCost)
 ```
-Whatever the policy, a price change appends `FilamentPriceHistory` and never mutates any
-existing snapshot.
+Example: 1 kg purchased for R$ 89,90 against a gram-denominated supply → quantity converts to
+1000 g, `unitCostSnapshot = 89.90 / 1000 = R$ 0,089900/g`. Both supplied forms are rejected as
+`PURCHASE_COST_MISMATCH` if their canonical money values disagree. Quantity is first normalized
+to `numeric(14,4)` in the supply base unit and must remain positive; an unrepresentable positive
+input is rejected as `QUANTITY_BELOW_BASE_PRECISION` before any cost division. `Supply.LatestPurchaseUnitCost` caches
+the most recent `unitCostSnapshot`; it is **not** a weighted average and is never recomputed from
+older movements.
+
+### CR-10.2 — Current price policy (`inventory.filament_price_policy`) — **deferred to S4**
+```
+LAST_PURCHASE  → S3's de facto behaviour (CR-10.1) — not yet a chosen costing policy
+MANUAL         → open
+WEIGHTED_AVERAGE → open — requires consumption tracking the Production module does not exist to provide yet
+```
+Whichever policy S4 chooses, it must not retroactively change a quote or production order already
+costed ([ADR-0006](architecture/ADR-0006-estimated-vs-actual-cost.md)).
 
 ---
 
-## 11. Stock
+## 11. Stock *(implemented S3)*
 
-### CR-11.1
+### CR-11.1 — Current stock (implemented)
 ```
-estimatedStock(material) = Σ movements where Direction=IN  (+quantity)
-                         + Σ movements where Direction=OUT (-quantity)
-                         + Σ movements where Direction=ADJUSTMENT (±quantity)
+currentStockBaseUnit(supply) = Σ inventory_movement.quantity_delta_base_unit
+                                where supply_id = supply.id
 ```
+`quantity_delta_base_unit` is signed at the point each movement is posted (positive for
+`InitialBalance`/`PurchaseReceipt`/`ManualIncrease`, negative for `ManualDecrease`, derived for
+`Correction` — see CR-11.2), so this is a plain sum, never a `CASE` on a separate direction column.
+`Supply.CurrentStockBaseUnit` caches this sum, written only alongside the movement insert that
+produced it (same transaction) — never independently.
 
-### CR-11.2 — Count adjustment
+**Non-negative invariant (implemented):** a movement whose delta would drive
+`currentStockBaseUnit` below zero is rejected (`INSUFFICIENT_STOCK`), including under two
+concurrent requests against the same supply — enforced via the aggregate's own
+optimistic-concurrency `Version`, not a new locking primitive
+([ADR-0017 §3](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md)).
+
+### CR-11.2 — Count-based correction (implemented)
 ```
-adjustmentQuantity = countedQuantity - systemQuantityAtCount
+signedDelta = countedQuantity(baseUnit) - currentStockBaseUnit(supply)
 ```
-emitted as one `ADJUSTMENT` movement. History is never rewritten.
+Posted as one `Correction` movement carrying `signedDelta`. A `signedDelta` of exactly zero is
+rejected (`CORRECTION_QUANTITY_UNCHANGED`) — a correction that changes nothing is not a valid
+movement. History is never rewritten; a later miscount is fixed by another `Correction`, not by
+editing this one.
 
 ---
 

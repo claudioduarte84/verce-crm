@@ -19,10 +19,27 @@ namespace Verce.IntegrationTests.S2;
 /// (mission §29-31). Deliberately uses its OWN disposable PostgreSQL container instead of the
 /// shared <see cref="PostgresFixture"/>, which always migrates straight to HEAD — these tests
 /// need to control exactly which migration is applied at each step.
+///
+/// <see cref="VerceDbContext.ConfigureModuleAssemblies"/> is a process-wide static, and this
+/// class (like <see cref="PostgresFixture"/>) mutates it. Declared in <see cref="PostgresCollection"/>
+/// PURELY so xUnit never runs it in parallel with any other Postgres-collection test — without
+/// that, two collections racing to set divergent module-assembly lists produces a genuinely
+/// non-deterministic EF model ("the model changes each time it is built"), not just a benign
+/// re-write of the same value (S3 made the two collections' desired values actually differ:
+/// this class needs a deliberately NARROWED module set at times, while every other
+/// Postgres-collection test needs the full production catalog).
 /// </summary>
+[Collection(PostgresCollection.Name)]
 public sealed class CreationSequenceMigrationTests : IAsyncLifetime
 {
     private const string QuartzTerminalMigration = "20260908004426_AddQuartzSchema";
+    // This class deliberately restricts ConfigureModuleAssemblies to Customers+Settings only, to
+    // exercise the S1→S2 transition in isolation (see class doc comment). A bare, target-less
+    // MigrateAsync() migrates to whichever migration is PHYSICALLY LAST in the assembly — which
+    // stopped being AddS2CustomersAndSettings the moment S3 added AddS3SuppliesAndInventory to
+    // the same assembly. Every call in this file now targets this constant explicitly instead of
+    // relying on that implicit, sprint-fragile assumption.
+    private const string S2TerminalMigration = "20260912230413_AddS2CustomersAndSettings";
     private PostgreSqlContainer _container = null!;
     private string _connectionString = string.Empty;
 
@@ -43,6 +60,16 @@ public sealed class CreationSequenceMigrationTests : IAsyncLifetime
     private VerceDbContext CreateContext() => new(
         new DbContextOptionsBuilder<VerceDbContext>().UseNpgsql(_connectionString).UseSnakeCaseNamingConvention().Options);
 
+    /// <summary>Widens the process-wide module-assembly registry to the SAME full catalog the
+    /// real composition root uses, then returns a context built against it — needed right before
+    /// migrating this deliberately S2-only database the rest of the way to head, so the model
+    /// backing that migration matches what generated it.</summary>
+    private VerceDbContext CreateFullyConfiguredContext()
+    {
+        VerceDbContext.ConfigureModuleAssemblies(Verce.Api.ModuleAssemblyCatalog.All);
+        return CreateContext();
+    }
+
     private static async Task<long> ScalarLongAsync(NpgsqlConnection connection, string sql)
     {
         await using var command = connection.CreateCommand();
@@ -62,7 +89,7 @@ public sealed class CreationSequenceMigrationTests : IAsyncLifetime
     {
         await using (var db = CreateContext())
         {
-            await db.Database.MigrateAsync();
+            await db.GetInfrastructure().GetRequiredService<IMigrator>().MigrateAsync(S2TerminalMigration);
             (await db.Database.GetAppliedMigrationsAsync()).Should().HaveCount(4);
         }
 
@@ -109,6 +136,12 @@ public sealed class CreationSequenceMigrationTests : IAsyncLifetime
         (await ScalarLongAsync(connection,
             "SELECT count(*) FROM information_schema.tables WHERE table_schema='platform' AND table_name LIKE 'qrtz_%'"))
             .Should().Be(12);
+
+        // The real host's own seed services (SettingsSeedService, InventorySeedService, ...)
+        // refuse to seed at all while ANY migration is pending — correctly so, but it means this
+        // S2-only database must be brought the rest of the way to head before booting the real
+        // host below, exactly like a genuine operator would before relying on it.
+        await using (var db = CreateFullyConfiguredContext()) { await db.Database.MigrateAsync(); }
 
         var storageRoot = Path.Combine(Path.GetTempPath(), "verce-migration-zero-" + Guid.NewGuid().ToString("N"));
         try
@@ -162,7 +195,7 @@ public sealed class CreationSequenceMigrationTests : IAsyncLifetime
 
         await using (var db = CreateContext())
         {
-            await db.Database.MigrateAsync();
+            await db.GetInfrastructure().GetRequiredService<IMigrator>().MigrateAsync(S2TerminalMigration);
         }
 
         await using (var db = CreateContext())
@@ -175,6 +208,9 @@ public sealed class CreationSequenceMigrationTests : IAsyncLifetime
             var sequence = (long)db.Entry(customer).Property("CreationSequence").CurrentValue!;
             sequence.Should().BePositive();
         }
+
+        // See the matching comment in Migration_from_zero_creates_the_full_S2_schema... above.
+        await using (var db = CreateFullyConfiguredContext()) { await db.Database.MigrateAsync(); }
 
         var storageRoot = Path.Combine(Path.GetTempPath(), "verce-s1-upgrade-" + Guid.NewGuid().ToString("N"));
         try
@@ -205,7 +241,7 @@ public sealed class CreationSequenceMigrationTests : IAsyncLifetime
     {
         await using (var db = CreateContext())
         {
-            await db.Database.MigrateAsync();
+            await db.GetInfrastructure().GetRequiredService<IMigrator>().MigrateAsync(S2TerminalMigration);
         }
 
         await using (var db = CreateContext())
@@ -224,7 +260,7 @@ public sealed class CreationSequenceMigrationTests : IAsyncLifetime
 
         await using (var db = CreateContext())
         {
-            await db.Database.MigrateAsync();
+            await db.GetInfrastructure().GetRequiredService<IMigrator>().MigrateAsync(S2TerminalMigration);
         }
 
         (await ScalarLongAsync(connection,
