@@ -43,10 +43,33 @@ const ANTIFORGERY_COOKIE_NAME = 'XSRF-TOKEN'
 const ANTIFORGERY_HEADER_NAME = 'X-XSRF-TOKEN'
 const STATE_CHANGING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
+export function hasAntiforgeryToken(): boolean {
+  return readCookie(ANTIFORGERY_COOKIE_NAME) !== null
+}
+
+/** Removes only the SPA-readable request-token cache. The server-owned HttpOnly antiforgery
+ * cookie remains authoritative and a later GET /api/auth/csrf issues a matching request token. */
+export function clearAntiforgeryToken(): void {
+  document.cookie = `${ANTIFORGERY_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Strict; Secure`
+}
+
 export interface ApiRequestOptions {
   method?: string
   body?: unknown
   signal?: AbortSignal
+}
+
+async function requestForm<T>(path: string, form: FormData): Promise<ApiResult<T>> {
+  const token = readCookie(ANTIFORGERY_COOKIE_NAME)
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (token) headers[ANTIFORGERY_HEADER_NAME] = token
+  try {
+    const response = await fetch(path, { method: 'POST', headers, credentials: 'include', body: form })
+    const payload = await response.json().catch(() => undefined)
+    if (response.ok) return { ok: true, data: payload as T, status: response.status }
+    const problem = isProblemDetails(payload) ? payload : undefined
+    return { ok: false, error: { status: response.status, kind: problem ? 'problem' : 'unexpected', safeMessage: safeMessageFor(problem, response.status), fieldErrors: problem?.errors, problem } }
+  } catch (cause) { return { ok: false, error: { status: 0, kind: 'network', safeMessage: NETWORK_ERROR_MESSAGE, debugDetail: String(cause) } } }
 }
 
 async function request<T>(path: string, options: ApiRequestOptions = {}): Promise<ApiResult<T>> {
@@ -105,4 +128,5 @@ export const apiClient = {
   post: <T>(path: string, body?: unknown, signal?: AbortSignal) => request<T>(path, { method: 'POST', body, signal }),
   put: <T>(path: string, body?: unknown, signal?: AbortSignal) => request<T>(path, { method: 'PUT', body, signal }),
   delete: <T>(path: string, signal?: AbortSignal) => request<T>(path, { method: 'DELETE', signal }),
+  postForm: <T>(path: string, form: FormData) => requestForm<T>(path, form),
 }

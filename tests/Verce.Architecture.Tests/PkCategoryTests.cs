@@ -1,6 +1,9 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Verce.Api;
+using Verce.Modules.Customers;
+using Verce.Modules.Settings;
 using Verce.Platform.Persistence;
 using Verce.SharedKernel.Domain;
 
@@ -13,6 +16,16 @@ namespace Verce.Architecture.Tests;
 /// </summary>
 public class PkCategoryTests
 {
+    /// <summary>
+    /// Builds the production-shaped model from the composition root's authoritative module set
+    /// without touching VerceDbContext's process-wide production registration.
+    /// </summary>
+    private sealed class FullApplicationModelContext(
+        DbContextOptions<VerceDbContext> options) : VerceDbContext(options)
+    {
+        protected override IReadOnlyList<System.Reflection.Assembly> ModuleAssemblies => ModuleAssemblyCatalog.All;
+    }
+
     // The "technical registry" (ADR-0011 §1.1): framework-owned types that CANNOT implement
     // our marker interfaces. This is the only allow-list in the system, and it is reviewed here
     // rather than left as an ad-hoc per-table exception.
@@ -47,10 +60,12 @@ public class PkCategoryTests
             .UseSnakeCaseNamingConvention()
             .Options;
 
+    private static FullApplicationModelContext BuildContext() => new(BuildOptions());
+
     [Fact]
     public void Every_entity_in_the_model_is_classified_by_exactly_one_category()
     {
-        using var context = new VerceDbContext(BuildOptions());
+        using var context = BuildContext();
         var model = context.Model;
 
         var unclassified = new List<string>();
@@ -82,7 +97,7 @@ public class PkCategoryTests
     [Fact]
     public void IDomainEntity_and_IMasterData_types_have_a_Guid_primary_key()
     {
-        using var context = new VerceDbContext(BuildOptions());
+        using var context = BuildContext();
         var violations = new List<string>();
 
         foreach (var entityType in context.Model.GetEntityTypes())
@@ -102,7 +117,7 @@ public class PkCategoryTests
     [Fact]
     public void Framework_owned_types_are_not_required_to_implement_application_markers()
     {
-        using var context = new VerceDbContext(BuildOptions());
+        using var context = BuildContext();
         var frameworkTypesInModel = context.Model.GetEntityTypes()
             .Select(e => e.ClrType)
             .Where(IsFrameworkOwned)
@@ -145,5 +160,45 @@ public class PkCategoryTests
 
         typeof(Verce.Platform.Outbox.OutboxMessageAttempt).Should().BeAssignableTo<ITechnicalTable>();
         typeof(Verce.Platform.Outbox.OutboxMessageAttempt).Should().NotBeAssignableTo<IDomainEntity>();
+    }
+
+    [Fact]
+    public void Full_application_model_contains_the_required_S2_entity_inventory()
+    {
+        using var context = BuildContext();
+        var expectedEntityTypes = new[]
+        {
+            typeof(Customer),
+            typeof(CustomerAddress),
+            typeof(BrandAsset),
+            typeof(BrandAssetVersion),
+            typeof(BrandAssetType),
+            typeof(AppSetting),
+            typeof(CompanyProfile),
+        };
+
+        foreach (var entityType in expectedEntityTypes)
+        {
+            context.Model.FindEntityType(entityType).Should().NotBeNull(
+                $"the PK-category model must include the production {entityType.FullName} entity");
+        }
+    }
+
+    [Fact]
+    public void BrandAssetType_is_Category_3_reference_data_with_a_textual_code_primary_key()
+    {
+        using var context = BuildContext();
+        var entityType = context.Model.FindEntityType(typeof(BrandAssetType));
+
+        typeof(BrandAssetType).Should().BeAssignableTo<IReferenceData>();
+        typeof(BrandAssetType).Should().NotBeAssignableTo<IDomainEntity>();
+        typeof(BrandAssetType).Should().NotBeAssignableTo<IAggregateRoot>();
+
+        entityType.Should().NotBeNull();
+        var primaryKey = entityType!.FindPrimaryKey();
+        primaryKey.Should().NotBeNull();
+        primaryKey!.Properties.Should().ContainSingle();
+        primaryKey.Properties[0].Name.Should().Be(nameof(BrandAssetType.Code));
+        primaryKey.Properties[0].ClrType.Should().Be(typeof(string));
     }
 }

@@ -25,6 +25,20 @@ namespace Verce.Platform.Persistence;
 /// </summary>
 public class VerceDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>, IDataProtectionKeyContext
 {
+    private static IReadOnlyList<System.Reflection.Assembly> _moduleAssemblies = Array.Empty<System.Reflection.Assembly>();
+
+    /// <summary>Called once by the composition root before the first context is built. Module
+    /// configurations remain physically owned by their modules (ADR-0001 §5.1).</summary>
+    public static void ConfigureModuleAssemblies(IEnumerable<System.Reflection.Assembly> assemblies) =>
+        _moduleAssemblies = assemblies.Distinct().ToArray();
+
+    /// <summary>
+    /// Module configuration assemblies for this context instance. Production contexts use the
+    /// composition-root registration; isolated model-verification contexts can override this
+    /// without mutating that process-wide registration.
+    /// </summary>
+    protected virtual IReadOnlyList<System.Reflection.Assembly> ModuleAssemblies => _moduleAssemblies;
+
     public VerceDbContext(DbContextOptions<VerceDbContext> options) : base(options)
     {
     }
@@ -46,6 +60,15 @@ public class VerceDbContext : IdentityDbContext<ApplicationUser, ApplicationRole
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+        builder.HasPostgresExtension("pg_trgm");
+
+        // ---- customers.customer_creation_sequence_seq — ADR-0011 §1.2.1: the internal,
+        // database-allocated final tie-breaker for Customer list ordering. Declared once here
+        // (like the pg_trgm extension above) because a PostgreSQL sequence is a physical,
+        // model-wide object, not something IEntityTypeConfiguration<T> can register. ----
+        builder.HasSequence<long>("customer_creation_sequence_seq", "customers")
+            .StartsAt(1)
+            .IncrementsBy(1);
 
         // ---- Identity tables live in the "platform" schema, renamed per DATA-MODEL §1 ----
         builder.Entity<ApplicationUser>(b =>
@@ -142,5 +165,14 @@ public class VerceDbContext : IdentityDbContext<ApplicationUser, ApplicationRole
             b.Property(e => e.ArchiveReason).HasMaxLength(200).IsRequired();
             b.HasIndex(e => e.RecoveryOperationId);
         });
+
+        foreach (var moduleAssembly in ModuleAssemblies)
+        {
+            // Most future-sprint modules are intentional markers in S1/S2. Avoid EF's noisy
+            // warning while still discovering each real module-owned configuration.
+            var hasConfiguration = moduleAssembly.DefinedTypes.Any(type => type.ImplementedInterfaces.Any(@interface =>
+                @interface.IsGenericType && @interface.GetGenericTypeDefinition() == typeof(IEntityTypeConfiguration<>)));
+            if (hasConfiguration) builder.ApplyConfigurationsFromAssembly(moduleAssembly);
+        }
     }
 }

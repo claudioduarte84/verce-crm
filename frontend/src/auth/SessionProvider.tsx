@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { apiClient } from '../api/client'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { apiClient, clearAntiforgeryToken, hasAntiforgeryToken } from '../api/client'
 import { SessionContext } from './SessionContext'
 import type { SessionState, SessionUser } from './session'
 
@@ -9,37 +9,52 @@ const CSRF_ENDPOINT = '/api/auth/csrf'
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SessionState>({ status: 'loading' })
+  // React StrictMode deliberately replays mount effects in development. A session refresh
+  // makes two rate-limited auth requests (CSRF + session), so simultaneous refreshes must share
+  // one in-flight operation rather than doubling traffic or tripping SECURITY §3.2's limit.
+  const refreshInFlight = useRef<Promise<void> | null>(null)
+  const generation = useRef(0)
 
-  const refresh = useCallback(async () => {
-    setSession({ status: 'loading' })
+  const refresh = useCallback(async ({ refreshCsrf = false }: { refreshCsrf?: boolean } = {}) => {
+    if (!refreshCsrf && refreshInFlight.current) {
+      return refreshInFlight.current
+    }
 
-    // The antiforgery token is bound to the caller's identity at mint time (anonymous vs a
-    // specific user) — refreshing it every time session state is (re)checked keeps it valid for
-    // whatever comes next: the login form on first mount, or logout/setup-account right after
-    // a successful login.
-    await apiClient.get(CSRF_ENDPOINT)
+    // A post-login refresh establishes a new principal generation. Any older session request
+    // must become incapable of restoring its identity after that boundary.
+    if (refreshCsrf) generation.current += 1
+    const operationGeneration = generation.current
+
+    const operation = (async () => {
+    if (generation.current === operationGeneration) setSession({ status: 'loading' })
+
+    // Mint only when missing, or immediately after login when the anonymous token must be
+    // replaced with one for the authenticated principal. Reissuing it on every route/reload
+    // wastes a rate-limited /api/auth request without improving CSRF protection.
+    if (refreshCsrf || !hasAntiforgeryToken()) {
+      await apiClient.get(CSRF_ENDPOINT)
+    }
 
     const result = await apiClient.get<SessionUser>(SESSION_ENDPOINT)
+    if (generation.current !== operationGeneration) return
 
     if (result.ok) {
       setSession({ status: 'authenticated', user: result.data })
       return
     }
 
-    if (result.error.kind === 'network') {
-      setSession({ status: 'unreachable' })
-      return
-    }
+    // Only 401 proves that the identity is absent/expired. Authorization failures, throttling,
+    // server errors and transport failures are transient session-check failures and must never
+    // masquerade as logout.
+    setSession(result.error.status === 401 ? { status: 'anonymous' } : { status: 'unreachable' })
+    })()
 
-    // 401 (no session) and 404 (endpoint not implemented yet on the backend — see session.ts)
-    // are both treated as "anonymous": the safe, conservative default either way.
-    if (result.error.status === 404 && import.meta.env.DEV) {
-      console.warn(
-        `[session] ${SESSION_ENDPOINT} returned 404 — the backend does not expose this endpoint ` +
-          'yet. Treating the user as anonymous. See the S1 FINAL REPORT open issues.',
-      )
+    refreshInFlight.current = operation
+    try {
+      await operation
+    } finally {
+      if (refreshInFlight.current === operation) refreshInFlight.current = null
     }
-    setSession({ status: 'anonymous' })
   }, [])
 
   useEffect(() => {
@@ -51,8 +66,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const logout = useCallback(async () => {
-    await apiClient.post(LOGOUT_ENDPOINT)
-    setSession({ status: 'anonymous' })
+    generation.current += 1
+    const result = await apiClient.post(LOGOUT_ENDPOINT)
+    if (result.ok) clearAntiforgeryToken()
+    setSession(result.ok || result.error.status === 401 ? { status: 'anonymous' } : { status: 'unreachable' })
   }, [])
 
   return <SessionContext value={{ session, refresh, logout }}>{children}</SessionContext>

@@ -159,6 +159,12 @@ the detailed breakdown lives at `/api/platform/health` and requires `Owner`.
 
 An architecture test asserts no route outside this table is anonymous.
 
+**`/api/settings/branding` is deliberately not on this list.** The Login page renders a static
+`VERCE 3D · Laboratório de Custos` fallback instead of fetching branding anonymously, so no
+Settings data — including branding — is ever readable pre-authentication. Full rationale, and
+what a future public bootstrap endpoint would require, is in
+[ADR-0015 §5.1](architecture/ADR-0015-brand-assets-and-application-branding.md#51-pre-authentication-branding-static-fallback-no-anonymous-fetch).
+
 ### 3.3 Sensitive operations
 
 These require `Owner` **and** always write an audit entry with a reason:

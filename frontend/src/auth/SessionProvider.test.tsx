@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionProvider } from './SessionProvider'
 import { useSession } from './useSession'
@@ -8,8 +8,14 @@ function jsonResponse(body: unknown, status: number) {
 }
 
 function Probe() {
-  const { session } = useSession()
-  return <div data-testid="status">{session.status}</div>
+  const { session, logout, refresh } = useSession()
+  return (
+    <div>
+      <div data-testid="status">{session.status}</div>
+      <button onClick={() => void logout()}>logout</button>
+      <button onClick={() => void refresh()}>refresh</button>
+    </div>
+  )
 }
 
 describe('SessionProvider', () => {
@@ -17,6 +23,7 @@ describe('SessionProvider', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch
+    document.cookie = 'XSRF-TOKEN=; Max-Age=0; Path=/'
     vi.restoreAllMocks()
   })
 
@@ -62,8 +69,8 @@ describe('SessionProvider', () => {
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'))
   })
 
-  it('treats a 404 (endpoint not implemented yet) as anonymous, not as an error state', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 404 }))
+  it.each([403, 404, 429, 500])('treats HTTP %s as unreachable, never as anonymous', async (status) => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status }))
 
     render(
       <SessionProvider>
@@ -71,7 +78,7 @@ describe('SessionProvider', () => {
       </SessionProvider>,
     )
 
-    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'))
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('unreachable'))
   })
 
   it('becomes unreachable on a genuine network failure, never silently anonymous', async () => {
@@ -84,5 +91,35 @@ describe('SessionProvider', () => {
     )
 
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('unreachable'))
+  })
+
+  it('invalidates the readable antiforgery token after successful logout', async () => {
+    document.cookie = 'XSRF-TOKEN=principal-a; Path=/'
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path.endsWith('/logout')) return Promise.resolve(new Response(null, { status: 204 }))
+      return Promise.resolve(jsonResponse({ id: 'u1', email: 'owner@example.com', displayName: 'Owner', roles: ['Owner'] }, 200))
+    })
+
+    render(<SessionProvider><Probe /></SessionProvider>)
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('authenticated'))
+    fireEvent.click(screen.getByRole('button', { name: 'logout' }))
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'))
+    expect(document.cookie).not.toContain('XSRF-TOKEN=')
+  })
+
+  it('ignores a refresh result that completes after logout advances the auth generation', async () => {
+    document.cookie = 'XSRF-TOKEN=principal-a; Path=/'
+    let completeSession!: (response: Response) => void
+    const pendingSession = new Promise<Response>((resolve) => { completeSession = resolve })
+    globalThis.fetch = vi.fn().mockImplementation((input: RequestInfo | URL) =>
+      String(input).endsWith('/logout') ? Promise.resolve(new Response(null, { status: 204 })) : pendingSession)
+
+    render(<SessionProvider><Probe /></SessionProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'logout' }))
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('anonymous'))
+    completeSession(jsonResponse({ id: 'u1', email: 'owner@example.com', displayName: 'Owner', roles: ['Owner'] }, 200))
+    await Promise.resolve()
+    expect(screen.getByTestId('status')).toHaveTextContent('anonymous')
   })
 })

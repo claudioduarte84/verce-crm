@@ -265,4 +265,37 @@ public class AuthEndpointTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
             "D-11: a SecurityStamp change must invalidate an already-issued cookie without waiting for its natural expiry");
     }
+
+    [Fact]
+    public async Task Default_auth_rate_limit_rejects_the_11th_request_within_a_minute_from_one_client()
+    {
+        // SECURITY §3.2: the production default (no RateLimiting:Auth override) must still be
+        // 10 requests/minute per client IP on /api/auth/* — this is the actual brute-force
+        // protection; M-S2-005/Wave-2's E2E-only override (playwright.config.ts) must never
+        // reach the production composition root.
+        var client = new AuthTestClient(_factory.CreateHttpsClient());
+        HttpResponseMessage? last = null;
+        for (var i = 0; i < 11; i++) last = await client.GetAsync("/api/auth/session");
+        last!.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+    }
+
+    [Fact]
+    public async Task Auth_rate_limit_permit_is_configurable_for_hosts_that_legitimately_need_more()
+    {
+        // The E2E test host raises this via RateLimiting:Auth:PermitLimit (never in production)
+        // specifically because every Playwright test shares one client IP and each page load
+        // re-checks the session — proving the override actually takes effect, not just that it
+        // parses, is what protects that E2E fix from silently regressing.
+        //
+        // VerceWebApplicationFactory serializes on a single process-wide lock held for its whole
+        // lifetime (M-TESTHOST-001) — the class-level _factory from InitializeAsync must be
+        // disposed before constructing a second factory here, or the two collide.
+        await _factory.DisposeAsync();
+        await using var raisedLimitFactory = new VerceWebApplicationFactory(_fixture.ConnectionString,
+            new Dictionary<string, string?> { ["RateLimiting:Auth:PermitLimit"] = "20" });
+        var client = new AuthTestClient(raisedLimitFactory.CreateHttpsClient());
+        HttpResponseMessage? last = null;
+        for (var i = 0; i < 11; i++) last = await client.GetAsync("/api/auth/session");
+        last!.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "11 requests must stay well under a configured limit of 20");
+    }
 }

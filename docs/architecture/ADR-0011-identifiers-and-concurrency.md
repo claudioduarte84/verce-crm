@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (pending external review)
 - **Date:** 2026-09-06
-- **Revised:** 2026-09-07 (gate blockers B-002, B-006) · **2026-09-07 (re-gate corrections B, F)**
+- **Revised:** 2026-09-07 (gate blockers B-002, B-006) · **2026-09-07 (re-gate corrections B, F)** · **2026-09-09 (Customer total ordering)**
 - **Sprint:** S0
 
 > **Scope note.** Architecture contract for S1 to implement. No code exists yet.
@@ -26,6 +26,10 @@ what a primary key is, how concurrent edits are detected, and what "delete" mean
 >   source or a template it is reference data" was **too broad** — by that test almost anything
 >   seeded qualifies. Replaced with lifecycle/ownership semantics, plus a complete per-table
 >   classification and a realistic marker policy for framework-owned entities.
+> - **2026-09-09 (Customer total ordering).** `name, created_at` can tie, while aggregate UUIDs
+>   remain prohibited pagination keys. Added an internal, database-allocated
+>   `creation_sequence` as the immutable final Customer-list tie-breaker. It is not Customer
+>   identity and is never a public Customer number.
 
 ---
 
@@ -130,6 +134,32 @@ by neither, or by two, fails.* No per-table exception list, and no impossible re
 **Business keys stay separate and human-readable**: `quote.number_text` (`260906-4`),
 `product.sku`, `sale.sale_number`, `production_order.order_number`. Never show a UUID to a user
 as a document identifier.
+
+### 1.2.1 Customer list total ordering
+
+The authoritative ordering for every paginated Customer list, filtered or unfiltered, is:
+
+```text
+name ASC, created_at ASC, creation_sequence ASC
+```
+
+`customers.customer.creation_sequence` is a persistence-only `bigint`, required, unique and
+immutable after insert. PostgreSQL allocates it from
+`customers.customer_creation_sequence_seq` (`bigint`, start 1, increment 1, no cycle), owned by
+the column. Allocation uses the column's database default; application code never computes
+`MAX(...) + 1`. Concurrent inserts therefore receive distinct values. Sequence and rollback gaps
+are expected, are never filled, and no value is reused after soft deletion.
+
+EF maps the field as database-generated on add and prevents application updates after save.
+Normal seed, test and import paths omit it and receive the database default; v1 exposes no path
+for callers to supply or override a value. Restores preserve both stored values and the sequence
+state as part of the PostgreSQL backup.
+
+This field is an explicit creation-order sequence permitted by the rule above, not a primary key,
+foreign key, aggregate identity, Customer number or commit chronology. It is absent from request
+and response DTOs and from the UI. Its only v1 purpose is to make pagination total and stable when
+collation considers names equal and `created_at` also ties. The final unique value resolves every
+such tie without weakening the UUID prohibition.
 
 ### 1.3 Complete table classification
 

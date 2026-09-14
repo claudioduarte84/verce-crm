@@ -10,6 +10,9 @@ namespace Verce.Architecture.Tests;
 /// </summary>
 public class SourceLevelRuleTests
 {
+    private static readonly Regex ForbiddenLinqIdOrdering = new(
+        @"(?:OrderBy|ThenBy)(?:Descending)?\s*\(\s*\w+\s*=>\s*\w+\.Id\b",
+        RegexOptions.Compiled);
     private static readonly string[] AllowedClockFiles =
     {
         "SystemClock.cs", "TestClock.cs", "IClock.cs",
@@ -43,7 +46,6 @@ public class SourceLevelRuleTests
     {
         // ADR-0011 §1.2: UUID v7 is identity/locality, never business ordering.
         var violations = new List<string>();
-        var linqPattern = new Regex(@"OrderBy(Descending)?\s*\(\s*\w+\s*=>\s*\w+\.Id\b", RegexOptions.Compiled);
         var sqlPattern = new Regex(@"ORDER\s+BY\s+(\w+\.)?id\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         foreach (var file in RepoPaths.AllSourceFiles())
@@ -51,13 +53,21 @@ public class SourceLevelRuleTests
             var lines = File.ReadAllLines(file);
             for (var i = 0; i < lines.Length; i++)
             {
-                if (linqPattern.IsMatch(lines[i]) || sqlPattern.IsMatch(lines[i]))
+                if (ForbiddenLinqIdOrdering.IsMatch(lines[i]) || sqlPattern.IsMatch(lines[i]))
                     violations.Add($"{Path.GetRelativePath(RepoPaths.RepoRoot, file)}:{i + 1}: {lines[i].Trim()}");
             }
         }
 
         violations.Should().BeEmpty("business ordering must use created_at, a business date, an explicit sequence, or sort_order — never Id");
     }
+
+    [Theory]
+    [InlineData("OrderBy")]
+    [InlineData("OrderByDescending")]
+    [InlineData("ThenBy")]
+    [InlineData("ThenByDescending")]
+    public void Business_ordering_guard_detects_every_Linq_variant(string method) =>
+        ForbiddenLinqIdOrdering.IsMatch($"query.{method}(x => x.Id)").Should().BeTrue();
 
     [Fact]
     public void No_float_or_double_declared_in_domain_or_platform_source()

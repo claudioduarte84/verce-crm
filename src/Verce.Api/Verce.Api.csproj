@@ -6,8 +6,25 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!-- M-S2-005: canonical source for generated frontend TypeScript contracts. Referencing
+       Microsoft.AspNetCore.OpenApi together with Microsoft.Extensions.ApiDescription.Server
+       turns OpenApiGenerateDocumentsOnBuild ON by default — which breaks an ordinary
+       `dotnet build` (it builds the real composition root via HostFactoryResolver, which fails
+       closed under the Production Data Protection guard with no certificate configured). Pinned
+       explicitly false here; `npm run api:generate` in frontend/ overrides it back to true via
+       an explicit -p: MSBuild global property (command-line properties always win over a
+       project-file assignment), plus ASPNETCORE_ENVIRONMENT=Development and
+       Outbox:SchedulingEnabled=false so the introspection host actually starts and exits. -->
+  <PropertyGroup>
+    <OpenApiGenerateDocumentsOnBuild>false</OpenApiGenerateDocumentsOnBuild>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.11">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>

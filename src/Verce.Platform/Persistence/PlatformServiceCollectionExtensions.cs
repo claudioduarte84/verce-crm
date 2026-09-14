@@ -28,6 +28,7 @@ public static class PlatformServiceCollectionExtensions
         this IServiceCollection services, IConfiguration configuration, IHostEnvironment environment,
         IEnumerable<Assembly> moduleAssemblies)
     {
+        VerceDbContext.ConfigureModuleAssemblies(moduleAssemblies);
         services.AddSingleton<IClock, SystemClock>();
 
         // Built once at startup; throws loudly on a broken ownership chain (ADR-0011 §2.5).

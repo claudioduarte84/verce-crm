@@ -32,7 +32,8 @@ domain assemblies** and the ban is enforced by an architecture test.
 ### Customer (AR)
 Fields: `Id`, `PersonType {INDIVIDUAL, COMPANY}`, `Name`, `TradeName?`, `Document?`
 (CPF/CNPJ, optional, normalized digits only), `Email?`, `Phone?`, `Notes?`, `IsActive`,
-`DeletedAt?`, audit columns.
+`DeletedAt?`, audit columns. Persistence also assigns an internal `CreationSequence: long`; it is
+not exposed as Customer identity or product data.
 
 Children: `Addresses` (*E*, 0..N).
 
@@ -40,6 +41,9 @@ Invariants:
 - `Name` required, trimmed, 2..200 chars.
 - `Document`, when present, must be a structurally valid CPF (INDIVIDUAL) or CNPJ (COMPANY),
   and is **unique among non-deleted customers**. Absence is allowed and common.
+- `CreationSequence` is required, unique, database-allocated once and immutable. Gaps are allowed;
+  soft deletion never releases or recycles it. Customer lists use
+  `Name, CreatedAt, CreationSequence` for total deterministic pagination.
 - At most one address flagged `IsPrimary`; at most one flagged `IsDefaultShipping`.
 - A customer referenced by any quote or sale cannot be hard-deleted, only deactivated.
 

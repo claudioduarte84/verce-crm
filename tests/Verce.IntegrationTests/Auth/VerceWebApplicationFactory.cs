@@ -1,8 +1,10 @@
+using System.Linq;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Verce.IntegrationTests.Auth;
 
@@ -63,6 +65,7 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
             ["ConnectionStrings:Verce"] = _connectionString,
             ["DataProtection:DevKeyDirectory"] = Path.Combine(Path.GetTempPath(), "verce-test-dp-" + Guid.NewGuid().ToString("N")),
             ["Outbox:SchedulingEnabled"] = "false",
+            ["Settings:SeedOnStartup"] = "false",
         };
         foreach (var (key, value) in _extraConfiguration) _settings[key] = value;
 
@@ -116,11 +119,33 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseEnvironment("Development");
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(_settings));
 
+        // B2 (S2 final blockers): the generic host's default logging (Host.CreateDefaultBuilder)
+        // adds the Windows EventLog provider automatically on Windows. EventLogLoggerProvider
+        // wraps a per-machine/per-source OS handle (System.Diagnostics.EventLogInternal) that is
+        // a PROCESS-WIDE static, not scoped per host. Production never notices — it runs exactly
+        // one host for the process's entire lifetime — but this factory boots a fresh host per
+        // test: once one host's EventLog provider disposes that shared handle, any other host
+        // still writing through it (including THIS SAME host, mid-Quartz-shutdown, logging
+        // through Quartz's own MicrosoftLoggingProvider) throws ObjectDisposedException from
+        // Host.StopAsync's own hosted-service loop, surfacing as an AggregateException out of
+        // WebApplicationFactory.DisposeAsync. Removed here only — Program.cs is untouched
+        // because the defect cannot occur in a single-host-per-process production run.
+        builder.ConfigureLogging(logging => RemoveEventLogProvider(logging.Services));
+
         // D-11 needs SecurityStamp revalidation to happen on every request, not on the
         // framework's default 30-minute cadence, so the test can observe session invalidation
         // deterministically without waiting in real time.
         builder.ConfigureServices(services =>
             services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.Zero));
+    }
+
+    private static void RemoveEventLogProvider(IServiceCollection services)
+    {
+        var eventLogDescriptors = services
+            .Where(descriptor => descriptor.ServiceType == typeof(ILoggerProvider)
+                && descriptor.ImplementationType?.FullName == "Microsoft.Extensions.Logging.EventLog.EventLogLoggerProvider")
+            .ToList();
+        foreach (var descriptor in eventLogDescriptors) services.Remove(descriptor);
     }
 
     /// <summary>

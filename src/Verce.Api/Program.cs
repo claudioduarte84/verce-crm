@@ -6,8 +6,11 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Verce.Api.Auth;
+using Verce.Api.Authorization;
 using Verce.Api.Cli;
+using Verce.Api.Customers;
 using Verce.Api.Outbox;
+using Verce.Api.Settings;
 using Verce.Platform.Identity;
 using Verce.Platform.Persistence;
 
@@ -17,25 +20,38 @@ var builder = WebApplication.CreateBuilder(args);
 // Every module assembly is referenced here so the ownership registry (and future architecture
 // tests) can see them — the composition root wires every module; modules never reference
 // each other directly (ADR-0001 §3).
-var allModuleAssemblies = new[]
-{
-    typeof(Verce.Modules.Customers.CustomersModuleMarker).Assembly,
-    typeof(Verce.Modules.Catalog.CatalogModuleMarker).Assembly,
-    typeof(Verce.Modules.Inventory.InventoryModuleMarker).Assembly,
-    typeof(Verce.Modules.Costing.CostingModuleMarker).Assembly,
-    typeof(Verce.Modules.Pricing.PricingModuleMarker).Assembly,
-    typeof(Verce.Modules.Quoting.QuotingModuleMarker).Assembly,
-    typeof(Verce.Modules.Sales.SalesModuleMarker).Assembly,
-    typeof(Verce.Modules.Production.ProductionModuleMarker).Assembly,
-    typeof(Verce.Modules.Energy.EnergyModuleMarker).Assembly,
-    typeof(Verce.Modules.Documents.DocumentsModuleMarker).Assembly,
-    typeof(Verce.Modules.Finance.FinanceModuleMarker).Assembly,
-    typeof(Verce.Modules.Reporting.ReportingModuleMarker).Assembly,
-    typeof(Verce.Modules.AI.AIModuleMarker).Assembly,
-    typeof(Verce.Modules.Settings.SettingsModuleMarker).Assembly,
-};
+var allModuleAssemblies = Verce.Api.ModuleAssemblyCatalog.All;
 
 builder.Services.AddVercePlatform(builder.Configuration, builder.Environment, allModuleAssemblies);
+var configuredBrandAssetRoot = builder.Configuration["BrandAssets:StorageRoot"];
+if (builder.Environment.IsProduction()
+    && (string.IsNullOrWhiteSpace(configuredBrandAssetRoot) || !Path.IsPathRooted(configuredBrandAssetRoot)))
+{
+    throw new InvalidOperationException(
+        "Production Brand Asset storage requires BrandAssets:StorageRoot to be an explicit absolute durable path.");
+}
+var effectiveBrandAssetRoot = configuredBrandAssetRoot
+    ?? Path.Combine(AppContext.BaseDirectory, "data", "brand-assets");
+if (builder.Environment.IsProduction())
+{
+    try
+    {
+        Directory.CreateDirectory(effectiveBrandAssetRoot);
+        var probePath = Path.Combine(effectiveBrandAssetRoot, ".verce-write-probe-" + Guid.CreateVersion7().ToString("N"));
+        File.WriteAllBytes(probePath, []);
+        File.Delete(probePath);
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+    {
+        throw new InvalidOperationException(
+            "Production BrandAssets:StorageRoot must exist or be creatable and writable before HTTP starts.", ex);
+    }
+}
+builder.Services.Configure<Verce.Modules.Settings.BrandAssetStorageOptions>(options =>
+    options.StorageRoot = effectiveBrandAssetRoot);
+builder.Services.AddScoped<Verce.Modules.Settings.AppSettingValueReader>();
+builder.Services.AddScoped<Verce.Modules.Settings.BrandAssetStorage>();
+builder.Services.AddHostedService<Verce.Modules.Settings.SettingsSeedService>();
 
 // ---- Authentication: same-origin cookie, no bearer/JWT (ADR-0009 §1, SECURITY §2) ----
 // The cookie scheme(s) must be explicitly ADDED, not merely configured — ConfigureApplicationCookie
@@ -83,6 +99,7 @@ builder.Services.AddAuthorization(options =>
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
         .Build();
+    Permissions.AddPolicies(options);
 });
 
 // SECURITY §2.4: the SPA reads the token from a non-HttpOnly XSRF-TOKEN cookie and echoes it
@@ -98,15 +115,21 @@ builder.Services.AddAntiforgery(options =>
     options.HeaderName = "X-XSRF-TOKEN";
 });
 
-// SECURITY §2.4 / §3.2: 10 requests/minute per client IP on /api/auth/*.
+// SECURITY §2.4 / §3.2: 10 requests/minute per client IP on /api/auth/* in production.
+// Configurable (never hard-coded per CLAUDE.md §10) so the E2E test host — the only caller with
+// a legitimate reason to exceed real-user auth-check volume, since every Playwright test shares
+// one "client IP" (localhost) and each page load re-checks the session — can raise it without
+// touching the security-mandated production default.
+var authRateLimitPermitLimit = builder.Configuration.GetValue("RateLimiting:Auth:PermitLimit", 10);
+var authRateLimitWindow = TimeSpan.FromSeconds(builder.Configuration.GetValue("RateLimiting:Auth:WindowSeconds", 60));
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 10,
-            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = authRateLimitPermitLimit,
+            Window = authRateLimitWindow,
             QueueLimit = 0,
         }));
     options.OnRejected = (context, cancellationToken) =>
@@ -140,6 +163,8 @@ app.UseAntiforgery();
 
 app.MapAuthEndpoints();
 app.MapOutboxAdminEndpoints();
+app.MapCustomerEndpoints();
+app.MapSettingsEndpoints();
 
 // ---- Health endpoints (ADR-0012 §25, OPERATIONS §9): status word only, anonymous ----
 app.MapGet("/health/live", () => Results.Text("healthy")).AllowAnonymous();

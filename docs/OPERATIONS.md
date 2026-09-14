@@ -246,6 +246,29 @@ is created or rotated** — it does not change nightly.
 
 A backup is not a backup until a restore has been tested (§5.1 drill, S16).
 
+### 4.1 Brand-asset storage consistency
+
+Brand asset binaries live in the configured `BrandAssets:StorageRoot`, outside the web root;
+their metadata and immutable version rows live in PostgreSQL. Upload first normalizes and writes
+the content-addressed file, then commits the version metadata in the same Unit of Work as the
+asset's active-version change. PostgreSQL and the filesystem are not one ACID resource. A request
+always removes its private `.tmp` file, but never deletes a promoted canonical hash inline after a
+database failure: another concurrent transaction may already reference that same hash. A failed
+transaction can therefore leave a recoverable orphan canonical blob; this is safer than deleting
+committed content. Future garbage collection must prove that no committed
+`settings.brand_asset_version.file_path` references a hash before deleting it.
+
+`BrandAssets:StorageRoot` is mandatory in Production, must be an absolute path and is validated
+before HTTP is served. Development/Test may use the local application-directory fallback. The
+Compose `api` service mounts the named volume `verce_brand_assets` at
+`/var/lib/verce/brand-assets`; removing or recreating the application container must preserve that
+volume. Never run `docker compose down -v` during an application-container restart or recovery.
+
+The filesystem and PostgreSQL cannot share one transaction. Operators therefore back up and
+restore both artifacts together, and should periodically report content-addressed files with no
+`settings.brand_asset_version.file_path` reference as recoverable orphan candidates. Never delete
+an asset-version row or a referenced file: versions are historical document evidence.
+
 ---
 
 ## 5. Restore

@@ -231,7 +231,9 @@ already separated, so extracting a module means extracting its schema.
   join tables use a composite FK pair. Categories are declared by marker interfaces, so the
   architecture test is executable and needs no per-table exception list.
 - **UUID v7 is identity and index locality, never business ordering.** Never `ORDER BY id`.
-  Business keys (`quote_number`, `sku`) are separate unique columns.
+  Business keys (`quote_number`, `sku`) are separate unique columns. A dedicated persisted
+  sequence may stabilize ordering without becoming identity: Customer pagination uses the
+  internal immutable `creation_sequence` defined by ADR-0011 §1.2.1, never its UUID.
 - **Optimistic concurrency** via an explicit `version bigint not null default 1` on every
   aggregate root, advanced **once per Unit of Work** by
   an interceptor whenever **any** entity inside the aggregate changes — root, child or

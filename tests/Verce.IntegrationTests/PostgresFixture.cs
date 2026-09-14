@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Testcontainers.PostgreSql;
 using Verce.Platform.Persistence;
+using Verce.Modules.Customers;
+using Verce.Modules.Settings;
 
 namespace Verce.IntegrationTests;
 
@@ -16,6 +18,9 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        // The production composition root supplies module-owned configurations. Direct test
+        // contexts must compose the same model before migrating from zero.
+        VerceDbContext.ConfigureModuleAssemblies([typeof(CustomersModuleMarker).Assembly, typeof(SettingsModuleMarker).Assembly]);
         _container = new PostgreSqlBuilder("postgres:17-alpine")
             .WithDatabase("verce_test")
             .WithUsername("verce")

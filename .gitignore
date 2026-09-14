@@ -11,6 +11,11 @@ out/
 *.userosscache
 *.sln.docstates
 
+# M-S2-005: the raw OpenAPI JSON `npm run api:generate` extracts at build time — fully
+# reproducible from source, never a second hand-maintained contract. The GENERATED TypeScript
+# file it produces (frontend/src/api/generated/) is the one that gets committed.
+artifacts/
+
 # ==================================================
 # Node / Vite / frontend
 # ==================================================
@@ -83,3 +88,5 @@ docker-compose.override.yml
 # ==================================================
 *.log
 logs/
+.playwright/
+tests/e2e/.playwright-bootstrap-token

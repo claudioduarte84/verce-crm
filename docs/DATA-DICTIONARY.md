@@ -180,6 +180,7 @@ The prompt requires this separation explicitly; results that do not carry a kind
 | `generated_document.brand_asset_version_ids` | The versions actually used | Resolving the asset's current version instead |
 | `generated_document.render_data_snapshot` | The frozen, resolved context | Rebuilding the context from live tables |
 | `generated_document.purpose` | `ISSUED` is immutable evidence | Treating a preview as the document the customer received |
+| `customer.creation_sequence` | Internal immutable database sequence used only as the final Customer pagination tie-breaker | Exposing it as a Customer number, generating it with `MAX + 1`, requiring gap-free values or reusing it after soft delete |
 | `<root>.version` | Aggregate-wide concurrency token, bumped by **any** child change | Expecting `xmin`, or expecting a child edit to leave it alone |
 | `audit_log.wave_index` | Which save wave of one command produced the row | Reading two rows for one entity as duplicated audit — they are two real state changes sharing a `correlation_id` |
 | `outbox_message.attempt_count` | Attempts consumed **in the current generation**; incremented **at claim** | Reading it as a lifetime total, or assuming a crashed worker gets its attempt back |

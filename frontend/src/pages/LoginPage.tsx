@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent } from 'react'
 import { useLocation, useNavigate, type Location } from 'react-router-dom'
-import { apiClient } from '../api/client'
+import { apiClient, hasAntiforgeryToken } from '../api/client'
 import { useSession } from '../auth/useSession'
 
 const LOGIN_ENDPOINT = '/api/auth/login'
@@ -25,6 +25,15 @@ export function LoginPage() {
     // D-8: a pending-setup or wrong-password rejection must look identical — the backend, once
     // it implements this endpoint, is responsible for that; the frontend just surfaces whatever
     // safe message comes back.
+    if (!hasAntiforgeryToken()) {
+      const csrf = await apiClient.get('/api/auth/csrf')
+      if (!csrf.ok) {
+        setSubmitting(false)
+        setError(csrf.error.safeMessage)
+        return
+      }
+    }
+
     const result = await apiClient.post(LOGIN_ENDPOINT, { email, password })
     setSubmitting(false)
 
@@ -33,7 +42,7 @@ export function LoginPage() {
       return
     }
 
-    await refresh()
+    await refresh({ refreshCsrf: true })
     navigate(from, { replace: true })
   }
 

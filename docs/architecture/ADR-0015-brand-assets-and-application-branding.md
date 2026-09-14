@@ -91,13 +91,71 @@ proposal show the full signature — three roles, one asset library, no code cha
 
 ### 5. Application branding is resolved, never hard-coded
 
-The frontend fetches branding from `/api/settings/branding` (product name `VERCE 3D`, subtitle
-`Laboratório de Custos`, and the three asset URLs) and renders from that response.
-**No `import logo from './logo.png'` anywhere** — enforced by a lint rule, in the same spirit as
-the no-hard-coded-colours rule of [ADR-0014](ADR-0014-frontend-architecture-and-theming.md).
+The **authenticated** frontend fetches branding from `/api/settings/branding` (product name
+`VERCE 3D`, subtitle `Laboratório de Custos`, and the three asset URLs) and renders from that
+response. **No `import logo from './logo.png'` anywhere** — enforced by a lint rule, in the same
+spirit as the no-hard-coded-colours rule of
+[ADR-0014](ADR-0014-frontend-architecture-and-theming.md).
 
 Bootstrap defaults ship as seeded VERCE assets, so a fresh install is branded rather than blank,
 and the operator replaces them without touching code.
+
+### 5.1 Pre-authentication branding: static fallback, no anonymous fetch
+
+*(Added S2 gate corrections, 2026-09-13; corrected 2026-09-13 — see §5.2 for the exact
+per-route permission split, which this section previously stated incorrectly.)*
+`/api/settings/branding` requires authentication, same as every other Settings-module endpoint —
+see [SECURITY §3.2](../SECURITY.md#32-mechanism). The Login page therefore **never calls it**: it
+renders a static, hard-coded fallback (`VERCE 3D · Laboratório de Custos`) and nothing else.
+This is a deliberate decision, not an oversight, made for two independent reasons:
+
+1. **No anonymous route for branding.** Widening the anonymous allow-list in
+   [SECURITY §3.2](../SECURITY.md#32-mechanism) to admit an unauthenticated settings read is a
+   security-boundary change, not a UI change, and the allow-list is deliberately closed and
+   reviewed by an architecture test. A pre-auth branding endpoint would need its own ADR
+   addressing what it may leak to an unauthenticated caller (product name is harmless; a
+   future custom-domain or white-label deployment might disagree).
+2. **The static fallback already satisfies the requirement.** `ResolvedBranding`'s
+   `FALLBACK_BRANDING` (`frontend/src/branding/branding.ts`) is exactly the seeded default, so an
+   unauthenticated visitor sees identical branding to a freshly-installed, never-customized
+   instance. The only case this does not cover is an operator who has *renamed* the product and
+   expects the Login page to reflect that before signing in — accepted as out of scope for v1.
+
+**If a future requirement needs the Login page to reflect a customized product name/logo before
+authentication**, the fix is a new, explicit public bootstrap endpoint (e.g.
+`GET /api/settings/branding/public`) returning only `productName`, `productSubtitle` and the
+`SYSTEM_LOGO`/`SYSTEM_LOGO_COMPACT`/`FAVICON` URLs — never the full `BrandingResponse`, never
+`CompanyProfile`, never the brand-asset library. That is a new architecture and security decision
+(new anonymous route, new architecture-test exception, explicit review of what it exposes), not
+a two-line change to the existing authenticated endpoint. Until such an ADR exists, Login stays
+on the static fallback.
+
+### 5.2 Authenticated permission split (DOC-S2-001 correction, 2026-09-13)
+
+This ADR previously stated that `/api/settings/branding` sits behind the Owner-only
+`SettingsManage` policy, same as the rest of the Settings module. That was wrong: the
+implemented and independently certified S2 contract splits **branding read** from **brand
+administration**, exactly as `Verce.Api/Settings/SettingsEndpoints.cs` requires today:
+
+| Route | Permission | Roles |
+|---|---|---|
+| `GET /api/settings/branding` | `CustomersRead` | Owner, Operator, Viewer |
+| `GET /api/settings/brand-assets/versions/{id}/content` | `CustomersRead` | Owner, Operator, Viewer |
+| `GET`/`PUT /api/settings/company-profile` | `SettingsManage` | Owner only |
+| `GET /api/settings` (app settings) / `PUT /api/settings/{key}` | `SettingsManage` | Owner only |
+| `POST /api/settings/brand-assets` (create asset), upload/activate a version | `BrandAssetsManage` | Owner only |
+
+The rationale: any authenticated user who can see a customer or a quote also needs to see the
+app's own branding (product name, subtitle, logo) — it is display data, not configuration —
+while *changing* a brand asset, uploading a new version, or activating one remains an
+Owner-only administrative act, same as every other Settings mutation. `CustomersRead` was
+reused rather than inventing a new `BrandingRead` permission because the audience is identical
+(§3.1 SECURITY.md: Owner/Operator/Viewer all need read access to day-to-day operational data).
+
+This does **not** change §5.1's conclusion: `/api/settings/branding` still requires
+*authentication* — only the specific authenticated permission was corrected here. Pre-auth/
+anonymous access remains categorically disallowed; the Login page still renders the static
+`FALLBACK_BRANDING` and never calls this endpoint.
 
 ### 6. Upload validation pipeline
 

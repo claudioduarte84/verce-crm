@@ -42,6 +42,39 @@ public sealed class AuthTestClient
         return response;
     }
 
+    public async Task<HttpResponseMessage> PutAsync<T>(string path, T body, bool withAntiforgery = true) =>
+        await SendJsonAsync(HttpMethod.Put, path, body, withAntiforgery);
+
+    public async Task<HttpResponseMessage> DeleteAsync(string path, bool withAntiforgery = true)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Delete, path);
+        ApplyCookies(request);
+        if (withAntiforgery && _cookies.TryGetValue("XSRF-TOKEN", out var token)) request.Headers.Add("X-XSRF-TOKEN", token);
+        var response = await _client.SendAsync(request);
+        CaptureCookies(response);
+        return response;
+    }
+
+    public async Task<HttpResponseMessage> PostMultipartAsync(string path, MultipartFormDataContent body, bool withAntiforgery = true)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = body };
+        ApplyCookies(request);
+        if (withAntiforgery && _cookies.TryGetValue("XSRF-TOKEN", out var token)) request.Headers.Add("X-XSRF-TOKEN", token);
+        var response = await _client.SendAsync(request);
+        CaptureCookies(response);
+        return response;
+    }
+
+    private async Task<HttpResponseMessage> SendJsonAsync<T>(HttpMethod method, string path, T body, bool withAntiforgery)
+    {
+        using var request = new HttpRequestMessage(method, path) { Content = JsonContent.Create(body) };
+        ApplyCookies(request);
+        if (withAntiforgery && _cookies.TryGetValue("XSRF-TOKEN", out var token)) request.Headers.Add("X-XSRF-TOKEN", token);
+        var response = await _client.SendAsync(request);
+        CaptureCookies(response);
+        return response;
+    }
+
     public async Task EnsureCsrfCookieAsync()
     {
         var response = await GetAsync("/api/auth/csrf");

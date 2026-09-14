@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "commonjs",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "test:run-lock": "node scripts/verify-run-lock.cjs",
+    "test:harness-safety": "node scripts/verify-harness-safety.cjs",
+    "test:custom-owner-email": "node scripts/verify-custom-owner-email.cjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

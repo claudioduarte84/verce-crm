@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Verce.Platform.UnitOfWork;
+using Verce.Platform.Persistence;
 using Verce.SharedKernel.Domain;
 using Verce.SharedKernel.Time;
 
@@ -42,6 +43,27 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
     private void WriteAuditEntries(DbContext context)
     {
         var now = _clock.UtcNow;
+
+        foreach (var entry in context.ChangeTracker.Entries()
+                     .Where(entry => entry.State is EntityState.Added or EntityState.Modified))
+        {
+            if (entry.Metadata.FindProperty(ApplicationMetadataConfiguration.CreatedAt) is null
+                || entry.Metadata.FindProperty(ApplicationMetadataConfiguration.CreatedBy) is null
+                || entry.Metadata.FindProperty(ApplicationMetadataConfiguration.UpdatedAt) is null
+                || entry.Metadata.FindProperty(ApplicationMetadataConfiguration.UpdatedBy) is null) continue;
+            if (entry.State == EntityState.Added)
+            {
+                entry.Property(ApplicationMetadataConfiguration.CreatedAt).CurrentValue = now;
+                entry.Property(ApplicationMetadataConfiguration.CreatedBy).CurrentValue = _ambientContext.ActorUserId;
+                entry.Property(ApplicationMetadataConfiguration.UpdatedAt).CurrentValue = null;
+                entry.Property(ApplicationMetadataConfiguration.UpdatedBy).CurrentValue = null;
+            }
+            else
+            {
+                entry.Property(ApplicationMetadataConfiguration.UpdatedAt).CurrentValue = now;
+                entry.Property(ApplicationMetadataConfiguration.UpdatedBy).CurrentValue = _ambientContext.ActorUserId;
+            }
+        }
 
         var auditableEntries = context.ChangeTracker.Entries()
             .Where(e => e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)

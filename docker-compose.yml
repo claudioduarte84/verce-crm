@@ -16,5 +16,30 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    profiles: ["application"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Verce: Host=postgres;Port=5432;Database=verce;Username=verce;Password=verce_dev_only
+      BrandAssets__StorageRoot: /var/lib/verce/brand-assets
+      Settings__SeedOnStartup: "true"
+      DataProtection__CurrentCertificatePath: /run/secrets/verce-dp.pfx
+      DataProtection__CertificatePasswordFile: /run/secrets/verce-dp-password
+    ports:
+      - "8080:8080"
+    volumes:
+      - verce_brand_assets:/var/lib/verce/brand-assets
+      - ${VERCE_DP_CERT_PATH:-./secrets/verce-dp.pfx}:/run/secrets/verce-dp.pfx:ro
+      - ${VERCE_DP_PASSWORD_PATH:-./secrets/verce-dp-password}:/run/secrets/verce-dp-password:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   verce_postgres_data:
+  verce_brand_assets:

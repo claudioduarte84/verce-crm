@@ -392,10 +392,17 @@ application or a template that inherits it.
 | notes | text | null |
 | is_active | boolean | not null default true |
 | deleted_at | timestamptz | null |
+| creation_sequence | bigint | not null, database default from `customers.customer_creation_sequence_seq`; internal and immutable |
 
 - **U** partial: `(document) WHERE document IS NOT NULL AND deleted_at IS NULL`.
+- **U** `(creation_sequence)` — final deterministic pagination tie-breaker, never a public number.
 - **IX** `(name)` — trigram index `gin (name gin_trgm_ops)` for the home search box.
 - **IX** partial `(is_active) WHERE deleted_at IS NULL`.
+
+`customers.customer_creation_sequence_seq` is a `bigint` PostgreSQL sequence (`START 1`,
+`INCREMENT 1`, `NO CYCLE`) owned by `customer.creation_sequence`. Values are allocated by the
+database on insert, may contain rollback gaps and are never reused. The canonical list order is
+`name ASC, created_at ASC, creation_sequence ASC`.
 
 ### `customers.customer_address`
 `id` **PK**, `customer_id` **FK**→customer (cascade), `label`, `zip_code`, `street`, `number`,
