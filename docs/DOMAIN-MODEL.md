@@ -135,14 +135,15 @@ posting, and rejects an incompatible pair (`UNIT_CONVERSION_NOT_SUPPORTED`). See
 [ADR-0017 §4](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md#4-unit-normalization-a-closed-explicit-conversion-table--not-a-general-unit-of-measure-framework) —
 this is a closed, explicit conversion table, not a general unit-of-measure framework.
 
-### 3.7 Purchase receipt cost is informational only
+### 3.7 Purchase receipt cost and the S4 acquisition estimate
 `PurchaseReceipt` captures `UnitCostSnapshot`/`TotalCostSnapshot` (per base unit, converted
-alongside the quantity) purely as history — "what did the last purchase cost." This is **not**
-S4's actual costing policy (FIFO/LIFO/moving-average): that choice remains open, now scoped to all
-of Inventory rather than filament alone (see [DATA-DICTIONARY §5](DATA-DICTIONARY.md#purchase-cost-policy-deferred-to-s4)).
+alongside the quantity) as immutable acquisition history. S4 derives
+`WEIGHTED_AVERAGE_ACQUISITION` from every positive cost-bearing purchase receipt. This is an
+estimated acquisition basis, not remaining-stock valuation, FIFO/LIFO, accounting cost or actual
+consumption. `Supply.LatestPurchaseUnitCost` remains informational and is not used by Costing.
 
-> **Forward-reference note.** Sections below this point (Catalog, Costing, Production, Finance,
-> §15 Domain events) were drafted before S3 and still reference `FilamentId`/`FilamentLot`/
+> **Forward-reference note.** Sections below this point other than revised §6 (Costing) (Catalog,
+> Production, Finance, §15 Domain events) were drafted before S3 and still reference `FilamentId`/`FilamentLot`/
 > `SupplyLot`/`StockMovement`/`MaterialKind`, none of which exist anymore. Every such reference is
 > **stale** and must be reconciled by the sprint that actually builds that module, against `Supply`
 > (optionally carrying `FilamentDetails`) and `InventoryMovement` (§3 above) — see
@@ -248,44 +249,31 @@ vendor-specific code may be written before the device is selected**). Registrati
 ### CostEngine (domain service, pure)
 Input `CostInput` → output `CostBreakdown`. See [CALCULATION-RULES](CALCULATION-RULES.md).
 
-`CostInput` is a fully-resolved record: filament components with `GramsUsed` **and**
-`PricePerKgAtInstant`, supply components with `Quantity` **and** `UnitCostAtInstant`, manual
-lines, machine hourly rate, tariff price per kWh, labor rate, wastage rate, print duration,
-energy kWh (or the parameters to estimate it), and `Quantity` of units.
+S4's `CostCalculationInput` is fully resolved before entering the engine: generic Supply material
+lines preserve entered quantity/unit and normalized base quantity, resolved cost per base unit,
+wastage percentage, current stock and cost source; labor has minutes/rate/source; machine has
+minutes/rate; additional direct costs have description/amount; output quantity is an integer ≥ 1.
 
 `CostBreakdown` is a `VO` tree:
 ```
-CostBreakdown
-├── FilamentComponents[]  (filamentId, name, grams, pricePerKg, cost)
-├── SupplyComponents[]    (supplyId, name, quantity, unit, unitCost, cost, isPackaging)
-├── ManualLines[]         (description, amount)
-├── Energy                (kwh, pricePerKwh, tariffVersionId, source, cost)
-├── Machine               (hours, hourlyRate, cost)
-├── Labor                 (minutes, hourlyRate, cost)
-├── Wastage               (base, rate, cost)
-├── Totals                (filamentCost, supplyCost, packagingCost, manualCost,
-│                          directCost, wastageCost, unitTotalCost, batchTotalCost)
+CostCalculationResult
+├── Materials[]           (identity, entered + normalized + effective quantity,
+│                          source/policy/rate, before/wastage/after costs, stock warning)
+├── AdditionalDirectCosts[] (description, amount)
+├── Machine               (minutes, hourlyRate, cost)
+├── Labor                 (minutes, hourlyRate, source, cost)
+├── Totals                (material before waste, waste, materials, labor, machine,
+│                          additional, total estimated, output quantity, estimated unit cost)
 └── EngineVersion
 ```
 
-### CostExperiment (AR) — the Laboratory
-`Id`, `Name`, `Description?`, `Status {DRAFT, SAVED, CONVERTED, ARCHIVED}`, `CreatedBy`,
-process parameters (same shape as a recipe: duration, machine, labor, wastage, energy),
-`ResultSnapshot: jsonb` (a `CostBreakdown`), `ResultTotalCost: Money`,
-`SourceExperimentId?` (set when cloned), `ConvertedToProductId?`, `ConvertedAt?`.
+### Laboratory (stateless S4 application flow)
 
-Children: `CostExperimentComponent` (*E*) with
-`Kind {FILAMENT, SUPPLY, MANUAL}` + the corresponding fields — filament components carry
-`FilamentId` + `GramsUsed`, supply components carry `SupplyId` + `Quantity`, manual lines
-carry `Description` + `Amount`. Components may also be **ad-hoc**: a filament component may
-instead carry a free `PricePerKg` with no `FilamentId`, so an operator can simulate a material
-not yet registered. That is the point of a laboratory.
-
-Behaviours: `Recalculate()`, `Clone()`, `ConvertToProduct()` (creates a `Product` +
-`ProductRecipe` revision 1 from the experiment; ad-hoc components must be resolved to real
-master data first, or conversion is rejected with a listed reason).
-
-An experiment has **no commercial effect**: it creates no quote, no sale, no stock movement.
+The S4 Laboratory is not an aggregate. It has no ID, save, clone, history, conversion or database
+row. `POST /api/costing/calculate` returns a transient result and never creates a quote, sale,
+product, recipe, production record, audit row or stock movement. A line-level manual unit-cost
+override is a simulation input and does not update Supply or purchase history. Browser state may
+reset on reload. See ADR-0018.
 
 ---
 
@@ -675,10 +663,9 @@ Initial keys:
 | `pricing.price_rounding_policy` | `CENT` | Pricing |
 | `pricing.margin_warning_denominator` | `0.10` | Pricing |
 | `costing.default_labor_hourly_rate` | `0.00` | Costing |
-| `costing.default_wastage_rate` | `0.00` | Costing |
+| `costing.default_wastage_rate` | `0.00` percentage points (0–100) | Costing |
 | `energy.default_tariff_id` | seeded | Energy |
 | `energy.overhead_factor` | `0.00` | Energy |
-| `inventory.purchase_cost_policy` | *(not yet seeded — open decision, deferred to S4)* | Inventory/Costing |
 | `ui.default_theme` | `verce-default` | Frontend |
 | `branding.product_name` | `VERCE 3D` | Frontend, documents |
 | `branding.product_subtitle` | `Laboratório de Custos` | Frontend |

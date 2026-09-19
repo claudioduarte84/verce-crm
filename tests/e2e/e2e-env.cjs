@@ -11,11 +11,15 @@ const { join, resolve } = require('node:path')
 const API_PROJECT_DIR = resolve(__dirname, '..', '..', 'src', 'Verce.Api')
 const CONTROL_DATABASE_NAME = 'postgres'
 const DEV_DATABASE_NAME = 'verce'
+const PROTECTED_POSTGRES_CONTAINERS = new Set(['verce-postgres'])
 const DEFAULT_E2E_DATABASE_NAME = 'verce_e2e'
+const DEFAULT_E2E_USER = 'verce'
+const DEFAULT_E2E_PASSWORD = 'verce_dev_only'
 const DEFAULT_OWNER_EMAIL = 'e2e-owner@example.test'
 const DEFAULT_OWNER_NAME = 'E2E Owner'
 const DEFAULT_LOCK_TIMEOUT_MS = 300_000
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]+$/
+const ROLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/
 
 function splitConnectionString(connectionString) {
   if (typeof connectionString !== 'string') throw new Error('E2E connection string must be a string')
@@ -75,48 +79,27 @@ function assertDisposableDatabaseName(value) {
         `e.g. "${DEFAULT_E2E_DATABASE_NAME}".`,
     )
   }
+  if (!/^(verce_e2e|verce_test|verce_s4)(?:_[a-z0-9_]+)?$/.test(databaseName)) {
+    throw new Error(`Unsafe E2E database name "${value}". Disposable databases must start with verce_e2e, verce_test, or verce_s4.`)
+  }
   return databaseName
 }
 
-function resolveE2eDatabaseName() {
-  return process.env.VERCE_E2E_DATABASE || DEFAULT_E2E_DATABASE_NAME
-}
-
-function resolveDatabaseNameFromConnectionString(connectionString) {
-  const aliases = parseConnectionString(connectionString)
-    .filter((pair) => pair.normalizedKey === 'database' || pair.normalizedKey === 'initial catalog')
-    .map((pair) => normalizeDatabaseName(pair.value))
-  if (aliases.length === 0) return normalizeDatabaseName(resolveE2eDatabaseName())
-  if (new Set(aliases).size !== 1) {
-    throw new Error(`Conflicting E2E database aliases in connection string: ${aliases.join(', ')}`)
+/** Rejects a PostgreSQL role identifier the harness does not deliberately support (H-05/H-23).
+ * The harness only ever needs plain, ASCII, unquoted-in-source role names (e.g.
+ * `verce_s4_harness`); anything else is refused outright rather than partially escaped, so there
+ * is no identifier grammar this function accepts that could still be read as a SQL expression. */
+function assertSafeRoleName(value) {
+  if (typeof value !== 'string' || !ROLE_NAME_PATTERN.test(value)) {
+    throw new Error(`Unsafe PostgreSQL role identifier "${value}". E2E role names must match ${ROLE_NAME_PATTERN} (ASCII letters, digits and underscore; may not start with a digit).`)
   }
-  return aliases[0]
+  return value
 }
 
-function resolveE2eConnectionString() {
-  const configured = process.env.ConnectionStrings__Verce
-  if (!configured) {
-    return `Host=localhost;Port=5432;Database=${assertDisposableDatabaseName(resolveE2eDatabaseName())};Username=verce;Password=verce_dev_only`
-  }
-
-  const pairs = parseConnectionString(configured)
-  const databaseName = assertDisposableE2eDatabase(configured)
-  let wroteDatabase = false
-  const normalized = pairs
-    .filter((pair) => {
-      if (pair.normalizedKey !== 'database' && pair.normalizedKey !== 'initial catalog') return true
-      if (wroteDatabase) return false
-      wroteDatabase = true
-      return true
-    })
-    .map((pair) => (pair.normalizedKey === 'database' || pair.normalizedKey === 'initial catalog' ? `Database=${databaseName}` : pair.raw))
-  if (!wroteDatabase) normalized.push(`Database=${databaseName}`)
-  return normalized.join(';')
-}
-
-/** Fails fast before database creation, migrations, setup or any provisioning SQL. */
-function assertDisposableE2eDatabase(connectionString) {
-  return assertDisposableDatabaseName(resolveDatabaseNameFromConnectionString(connectionString))
+/** Delimited-identifier form of a validated role name, for `OWNER <role>` — never a string
+ * literal, and never string-concatenated without going through {@link assertSafeRoleName} first. */
+function quotePostgresRoleIdentifier(value) {
+  return `"${assertSafeRoleName(value).replaceAll('"', '""')}"`
 }
 
 function quotePostgresIdentifier(identifier) {
@@ -124,53 +107,280 @@ function quotePostgresIdentifier(identifier) {
   return `"${safeIdentifier.replaceAll('"', '""')}"`
 }
 
-function controlPsql(argumentsAfterPsql) {
+/** Semantic groups for EVERY connection-string endpoint property this harness recognizes,
+ * database/catalog included — there is exactly one place that decides what counts as a
+ * duplicate, not one for database and a separately-maintained one for everything else (R-01).
+ * Anything not listed here (SSL options, etc.) passes through unexamined and is deliberately
+ * dropped when the canonical connection string is rebuilt from a resolved target (see
+ * {@link resolveE2ePostgresTarget}) — the harness only ever re-emits fields it has itself
+ * validated. */
+const ENDPOINT_ALIAS_TO_SEMANTIC = new Map([
+  ['host', 'host'], ['server', 'host'],
+  ['port', 'port'],
+  ['username', 'user'], ['user id', 'user'], ['userid', 'user'], ['user name', 'user'], ['user', 'user'],
+  ['database', 'database'], ['initial catalog', 'database'],
+  ['password', 'password'], ['pwd', 'password'],
+])
+
+/**
+ * H-01/R-01/§3-§9: an E2E connection configuration that names the SAME endpoint semantic
+ * property more than once — whether through the identical key or a different alias of it
+ * (`Host=a;Host=b`, `Host=a;Server=b`, `Port=1;Port=2`, `Username=a;User ID=b`,
+ * `Database=a;Initial Catalog=b`, `Password=a;Pwd=b`) — is rejected outright rather than
+ * resolved by picking a first or last occurrence. **Equal values are rejected exactly the same
+ * as conflicting ones** (R-01): this is a count check on raw occurrences, never a value
+ * comparison, because two occurrences that happen to agree today are still two sources of truth
+ * that could disagree after either one is edited, and a harness that can `DROP DATABASE` must
+ * never let that be possible. A real ADO.NET-family parser (Npgsql included) commonly takes the
+ * LAST occurrence; a naive custom parser might take the FIRST; refusing ambiguity outright is
+ * simpler and strictly safer than re-implementing Npgsql's precedence rules for a test harness —
+ * see docs/OPERATIONS.md §7.1 and tests/e2e/README.md.
+ *
+ * R-02: the thrown diagnostic identifies only the semantic property name and the literal alias
+ * *spellings* involved (`Password`, `Pwd`) — never a raw `key=value` pair, never a value, and
+ * never the connection string itself. This applies uniformly to every property, not only
+ * `password`/`pwd`, so there is exactly one sanitized code path to audit rather than a sanitized
+ * one for secrets and a leaky one for everything else.
+ */
+function extractConnectionEndpoint(connectionString) {
+  const pairs = parseConnectionString(connectionString)
+  const bySemantic = new Map()
+  for (const pair of pairs) {
+    const semantic = ENDPOINT_ALIAS_TO_SEMANTIC.get(pair.normalizedKey)
+    if (!semantic) continue
+    if (!bySemantic.has(semantic)) bySemantic.set(semantic, [])
+    bySemantic.get(semantic).push(pair)
+  }
+  const endpoint = {}
+  for (const [semantic, occurrences] of bySemantic) {
+    if (occurrences.length > 1) {
+      const aliasesUsed = [...new Set(occurrences.map((pair) => pair.key.trim()))]
+      throw new Error(
+        `E2E_AMBIGUOUS_CONNECTION_TARGET: duplicate semantic property '${semantic}' ` +
+        `(specified ${occurrences.length} times via: ${aliasesUsed.join(', ')}). Provide exactly one ` +
+        'value per endpoint property — even equal values are rejected, never compared, because this ' +
+        'harness can destroy databases and must never guess which one Npgsql would use.',
+      )
+    }
+    endpoint[semantic] = occurrences[0].value
+  }
+  return endpoint
+}
+
+function resolveE2eDatabaseName() {
+  return process.env.VERCE_E2E_DATABASE || DEFAULT_E2E_DATABASE_NAME
+}
+
+/** Delegates its duplicate-alias detection entirely to {@link extractConnectionEndpoint} (R-01)
+ * — there is no second, independently-maintained notion of "conflicting database aliases"
+ * anymore. Equal-value duplicates (`Database=a;Database=a`, `Database=a;Initial Catalog=a`) are
+ * rejected exactly like conflicting ones, by the same occurrence-count check every other
+ * semantic property uses. */
+function resolveDatabaseNameFromConnectionString(connectionString) {
+  const database = extractConnectionEndpoint(connectionString).database
+  return database === undefined ? normalizeDatabaseName(resolveE2eDatabaseName()) : normalizeDatabaseName(database)
+}
+
+/** Fails fast before database creation, migrations, setup or any provisioning SQL. */
+function assertDisposableE2eDatabase(connectionString) {
+  return assertDisposableDatabaseName(resolveDatabaseNameFromConnectionString(connectionString))
+}
+
+/** `docker inspect <selector>` with a clean, harness-shaped failure instead of a raw exec
+ * stack trace — used only for read-only identity/state inspection, never for a destructive
+ * command. `selector` may be a container name, a full ID, a short ID, or anything else Docker
+ * itself accepts; whichever form is given, the immutable `.Id` on the result is what every
+ * later comparison and every later `docker exec` uses (H-06). */
+function inspectDockerContainer(selector) {
+  let stdout
+  try {
+    stdout = execFileSync('docker', ['inspect', selector], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (error) {
+    throw new Error(`E2E_DATABASE_TARGET_UNAVAILABLE: could not inspect Docker target "${selector}" (${String(error.message || error).split('\n')[0]}).`)
+  }
+  let parsed
+  try { parsed = JSON.parse(stdout) } catch { parsed = [] }
+  const inspected = parsed[0]
+  if (!inspected) throw new Error(`E2E_DATABASE_TARGET_UNAVAILABLE: Docker selector "${selector}" did not resolve to a container.`)
+  return inspected
+}
+
+/** Fast, Docker-independent rejection of the protected container's literal name(s) — correct
+ * even if the protected container cannot currently be inspected at all, which the ID-based check
+ * below cannot guarantee on its own. */
+function assertSelectorIsNotProtectedByName(selector) {
+  const normalized = String(selector).trim().toLowerCase()
+  for (const protectedName of PROTECTED_POSTGRES_CONTAINERS) {
+    if (normalized === protectedName.toLowerCase()) {
+      throw new Error(`E2E_PROTECTED_DATABASE_TARGET: "${selector}" is the protected container "${protectedName}".`)
+    }
+  }
+}
+
+/** Read-only: resolves the protected container's own canonical, immutable ID right now, if it
+ * exists. Used only as a comparison value — this never becomes a target, and nothing here mutates
+ * or even connects to it. */
+function resolveProtectedContainerId() {
+  for (const protectedName of PROTECTED_POSTGRES_CONTAINERS) {
+    try { return inspectDockerContainer(protectedName).Id } catch { /* protected container not inspectable right now; the name check still applies */ }
+  }
+  return undefined
+}
+
+/**
+ * H-02: rejects the protected container by literal name (see {@link assertSelectorIsNotProtectedByName})
+ * AND by full Docker ID, short Docker ID, or any other Docker-supported alias that resolves to the
+ * SAME canonical container identity. The pre-hardening guard compared selector strings only, which
+ * a selector of the protected container's own Docker ID could sail straight through; `docker
+ * inspect` resolves any of those spellings to one immutable `.Id`, so comparing THAT is what
+ * actually closes the gap, independent of which name or ID happened to be configured.
+ */
+function assertContainerIsNotProtected(selector, inspected) {
+  assertSelectorIsNotProtectedByName(selector)
+  const protectedId = resolveProtectedContainerId()
+  if (protectedId && inspected.Id === protectedId) {
+    throw new Error(`E2E_PROTECTED_DATABASE_TARGET: "${selector}" resolves to the protected container (id ${protectedId}) under a different name or ID.`)
+  }
+}
+
+/**
+ * THE single authoritative E2E PostgreSQL target (H-01). Resolved fresh on every call — never
+ * cached — from:
+ *
+ *   1. the mandatory `VERCE_E2E_POSTGRES_CONTAINER` Docker selector: inspected for its immutable
+ *      identity, protection status (H-02), running state and published port, using that same
+ *      immutable ID for every later `docker exec` (H-06) — there is deliberately no fallback to
+ *      any shared container;
+ *   2. the optional `ConnectionStrings__Verce` override: parsed once for its endpoint aliases,
+ *      with any duplicate semantic key rejected outright as `E2E_AMBIGUOUS_CONNECTION_TARGET`
+ *      rather than approximated (H-01/§7-§9) — this harness never re-implements Npgsql's own
+ *      alias-precedence rules, it simply refuses to guess which one Npgsql would have picked;
+ *
+ * cross-validated so the application's declared host/port PROVABLY match the inspected
+ * container's published port before this returns. Every caller that ever talks to this
+ * PostgreSQL server — building the application's own connection string, or issuing a
+ * `docker exec` for CREATE/DROP/migrate/psql — goes through this one function; nothing downstream
+ * parses a connection string a second time or keeps its own notion of "the target".
+ *
+ * @returns {{containerId: string, containerName: string, host: string, publishedPort: string,
+ *   internalPort: string, database: string, user: string, password: string, connectionString: string}}
+ */
+function resolveE2ePostgresTarget() {
+  const configured = process.env.ConnectionStrings__Verce
+  // Parsed exactly ONCE: the ambiguity check (R-01) and every field below (host, port, user,
+  // password, database) all read from this same extraction — there is no second parse that
+  // could disagree with it.
+  const endpoint = configured ? extractConnectionEndpoint(configured) : {}
+  const database = assertDisposableDatabaseName(endpoint.database ?? resolveE2eDatabaseName())
+
+  const selector = String(process.env.VERCE_E2E_POSTGRES_CONTAINER ?? '').trim()
+  if (!selector) throw new Error('E2E_POSTGRES_CONTAINER_REQUIRED: set VERCE_E2E_POSTGRES_CONTAINER to a disposable PostgreSQL container. There is no fallback to a shared container.')
+  assertSelectorIsNotProtectedByName(selector)
+
+  const inspected = inspectDockerContainer(selector)
+  assertContainerIsNotProtected(selector, inspected)
+  if (!inspected.State?.Running) throw new Error(`E2E_DATABASE_TARGET_UNAVAILABLE: "${selector}" is not running.`)
+  const published = inspected.NetworkSettings?.Ports?.['5432/tcp']?.[0]
+  if (!published?.HostPort) throw new Error(`E2E_DATABASE_TARGET_UNAVAILABLE: "${selector}" does not publish PostgreSQL port 5432.`)
+
+  const host = endpoint.host ?? '127.0.0.1'
+  if (!['localhost', '127.0.0.1'].includes(String(host).toLowerCase())) {
+    throw new Error(`E2E_DATABASE_TARGET_MISMATCH: application host "${host}" is not a loopback address; the E2E harness only targets a local disposable container.`)
+  }
+  const port = String(endpoint.port ?? published.HostPort)
+  if (port !== published.HostPort) {
+    throw new Error(`E2E_DATABASE_TARGET_MISMATCH: application port ${port} does not match "${selector}" (container ${inspected.Id}) published PostgreSQL port ${published.HostPort}.`)
+  }
+
+  const user = endpoint.user || DEFAULT_E2E_USER
+  const password = endpoint.password ?? DEFAULT_E2E_PASSWORD
+
+  return {
+    containerId: inspected.Id,
+    containerName: String(inspected.Name || selector).replace(/^\//, ''),
+    host,
+    publishedPort: published.HostPort,
+    internalPort: '5432',
+    database,
+    user,
+    password,
+    connectionString: `Host=${host};Port=${published.HostPort};Database=${database};Username=${user};Password=${password}`,
+  }
+}
+
+/** The application's own connection string — always literally `resolveE2ePostgresTarget()`'s
+ * canonical string (H-01): there is no separate code path that could re-derive a different
+ * value from the same inputs. */
+function resolveE2eConnectionString() {
+  return resolveE2ePostgresTarget().connectionString
+}
+
+function controlPsql(argumentsAfterPsql, target = resolveE2ePostgresTarget()) {
+  assertE2eRunLockHeld()
   return execFileSync(
     'docker',
-    ['exec', 'verce-postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'verce', '-d', CONTROL_DATABASE_NAME, ...argumentsAfterPsql],
+    ['exec', target.containerId, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', target.user, '-d', CONTROL_DATABASE_NAME, ...argumentsAfterPsql],
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
   ).trim()
 }
 
-function controlPsqlFromInput(sql, argumentsAfterPsql) {
+function controlPsqlFromInput(sql, argumentsAfterPsql, target = resolveE2ePostgresTarget()) {
+  assertE2eRunLockHeld()
   return execFileSync(
     'docker',
-    ['exec', '-i', 'verce-postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'verce', '-d', CONTROL_DATABASE_NAME, ...argumentsAfterPsql],
+    ['exec', '-i', target.containerId, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', target.user, '-d', CONTROL_DATABASE_NAME, ...argumentsAfterPsql],
     { input: sql, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
   ).trim()
 }
 
+function runE2ePsql(databaseName, argumentsAfterPsql, target = resolveE2ePostgresTarget()) {
+  assertE2eRunLockHeld()
+  const database = assertDisposableDatabaseName(databaseName)
+  return execFileSync('docker',
+    ['exec', target.containerId, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', target.user, '-d', database, ...argumentsAfterPsql],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+}
+
 /** Creates only a validated, disposable database. The control connection is PostgreSQL's neutral
- * maintenance database, never the protected application database. */
-function ensureDatabaseExists(databaseName) {
+ * maintenance database, never the protected application database. H-03: requires the E2E run
+ * lock to already be held — there is no path through this function that can run unlocked.
+ * H-05: the owner role is a validated, delimited identifier, never a string literal. */
+function ensureDatabaseExists(databaseName, target = resolveE2ePostgresTarget()) {
+  assertE2eRunLockHeld()
   const safeDatabaseName = assertDisposableDatabaseName(databaseName)
-  const exists = controlPsqlFromInput("SELECT 1 FROM pg_database WHERE datname = :'target_database';\n", ['-v', `target_database=${safeDatabaseName}`, '-tA'])
+  const exists = controlPsqlFromInput("SELECT 1 FROM pg_database WHERE datname = :'target_database';\n", ['-v', `target_database=${safeDatabaseName}`, '-tA'], target)
   if (exists === '1') return safeDatabaseName
-  controlPsql(['-c', `CREATE DATABASE ${quotePostgresIdentifier(safeDatabaseName)} OWNER verce`])
+  controlPsql(['-c', `CREATE DATABASE ${quotePostgresIdentifier(safeDatabaseName)} OWNER ${quotePostgresRoleIdentifier(target.user)}`], target)
   return safeDatabaseName
 }
 
-function dropE2eDatabaseIfExists(databaseName) {
+/** H-03: DROP requires the E2E run lock to already be held — enforced here, not merely by caller
+ * discipline, so no current or future call site can destroy a database outside the lock. */
+function dropE2eDatabaseIfExists(databaseName, target = resolveE2ePostgresTarget()) {
+  assertE2eRunLockHeld()
   const safeDatabaseName = assertDisposableDatabaseName(databaseName)
-  controlPsql(['-c', `DROP DATABASE IF EXISTS ${quotePostgresIdentifier(safeDatabaseName)}`])
+  controlPsql(['-c', `DROP DATABASE IF EXISTS ${quotePostgresIdentifier(safeDatabaseName)}`], target)
 }
 
-/** Applies EF Core migrations after the same disposable-database guard used for provisioning. */
-function applyMigrations(connectionString) {
-  assertDisposableE2eDatabase(connectionString)
+/** Applies EF Core migrations after the same disposable-database guard used for provisioning.
+ * H-03: also requires the E2E run lock. */
+function applyMigrations(target = resolveE2ePostgresTarget()) {
+  assertE2eRunLockHeld()
   execFileSync('dotnet', ['run', '--no-build', '--project', API_PROJECT_DIR, '--', 'migrate'], {
     cwd: API_PROJECT_DIR,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, ConnectionStrings__Verce: connectionString },
+    env: { ...process.env, ConnectionStrings__Verce: target.connectionString },
   })
 }
 
-function provisionE2eDatabase(connectionString) {
-  const databaseName = assertDisposableE2eDatabase(connectionString)
-  ensureDatabaseExists(databaseName)
-  applyMigrations(connectionString)
-  return databaseName
+/** Resolves the target ONCE and threads it through both destructive steps (H-01/H-03), so
+ * provisioning can never observe a different container/database than the one it just created. */
+function provisionE2eDatabase(target = resolveE2ePostgresTarget()) {
+  assertE2eRunLockHeld()
+  ensureDatabaseExists(target.database, target)
+  applyMigrations(target)
+  return target.database
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -449,19 +659,34 @@ module.exports = {
   CONTROL_DATABASE_NAME,
   DEV_DATABASE_NAME,
   DEFAULT_E2E_DATABASE_NAME,
+  DEFAULT_E2E_USER,
+  DEFAULT_E2E_PASSWORD,
   DEFAULT_OWNER_EMAIL,
   DEFAULT_OWNER_NAME,
   DATABASE_NAME_PATTERN,
+  ROLE_NAME_PATTERN,
+  PROTECTED_POSTGRES_CONTAINERS,
   resolveE2eDatabaseName,
   resolveE2eConnectionString,
+  resolveE2ePostgresTarget,
+  extractConnectionEndpoint,
+  inspectDockerContainer,
+  resolveProtectedContainerId,
+  assertSelectorIsNotProtectedByName,
+  assertContainerIsNotProtected,
   parseConnectionString,
   normalizeDatabaseName,
   resolveDatabaseNameFromConnectionString,
   assertDisposableDatabaseName,
   assertDisposableE2eDatabase,
+  assertSafeRoleName,
   quotePostgresIdentifier,
+  quotePostgresRoleIdentifier,
   ensureDatabaseExists,
   dropE2eDatabaseIfExists,
+  controlPsql,
+  controlPsqlFromInput,
+  runE2ePsql,
   applyMigrations,
   provisionE2eDatabase,
   E2E_RUN_LOCK_PORT,

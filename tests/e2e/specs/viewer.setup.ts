@@ -1,7 +1,6 @@
 import { test as setup, expect } from '@playwright/test'
-import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
-import { resolveE2eConnectionString, assertDisposableE2eDatabase, resolveOwnerEmail } from '../e2e-env.cjs'
+import { resolveE2eConnectionString, assertDisposableE2eDatabase, resolveOwnerEmail, runE2ePsql } from '../e2e-env.cjs'
 
 const viewerEmail = 'e2e-viewer@example.test'
 const password = 'e2e-synthetic-password-123'
@@ -22,7 +21,7 @@ function provisionDisposableViewer() {
     INSERT INTO platform.user_role (user_id, role_id)
     SELECT (SELECT id FROM platform."user" WHERE normalized_email = '${viewerEmail.toUpperCase()}'), (SELECT id FROM platform.role WHERE name = 'Viewer');
   `
-  execFileSync('docker', ['exec', 'verce-postgres', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'verce', '-d', database, '-c', sql], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+  runE2ePsql(database, ['-c', sql])
 }
 
 setup('provisions and authenticates a disposable Viewer through the real UI', async ({ page }) => {

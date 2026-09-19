@@ -1,15 +1,18 @@
 import { defineConfig, devices } from '@playwright/test'
 import { resolve } from 'node:path'
-import { acquireE2eRunLock, provisionE2eDatabase, releaseE2eRunLock, resolveE2eConnectionString } from './e2e-env.cjs'
+import { acquireE2eRunLock, provisionE2eDatabase, releaseE2eRunLock, resolveE2ePostgresTarget } from './e2e-env.cjs'
 
 /** S1 smoke plus real S2 authenticated browser certification. The setup project provisions and
  * signs in a disposable owner through the live API; dependent projects load that saved browser
  * storage state. Legacy S1 smoke cases retain their intentionally isolated network stubs. */
 
-// Canonical E2E database (M-S2-002): every process the suite spawns — this webServer, the
-// restart-persistence spec's own API processes, global-setup.cjs and operator.setup.ts — must
-// resolve the SAME disposable database from e2e-env.cjs, never the shared "verce" dev database.
-const e2eConnectionString = resolveE2eConnectionString()
+// Canonical E2E PostgreSQL target (M-S2-002, H-01): resolved ONCE, here, and threaded through by
+// value — this webServer, the restart-persistence spec's own API processes, global-setup.cjs and
+// operator.setup.ts all resolve their own copy from the SAME e2e-env.cjs, but every one of them
+// is required (by construction — see e2e-env.cjs) to name the same disposable container and
+// database, never the shared "verce" dev database or its container.
+const e2eTarget = resolveE2ePostgresTarget()
+const e2eConnectionString = e2eTarget.connectionString
 // The run lock must be held before ANY mutable step: Playwright does not guarantee globalSetup
 // finishes before webServer starts, so this config module — evaluated before any process is
 // spawned — acquires it, and only then provisions/migrates the disposable database. Ownership is
@@ -24,7 +27,7 @@ function releaseHarnessLock() {
   releaseE2eRunLock(e2eRunLock)
 }
 try {
-  provisionE2eDatabase(e2eConnectionString)
+  provisionE2eDatabase(e2eTarget)
 } catch (error) {
   releaseHarnessLock()
   throw error

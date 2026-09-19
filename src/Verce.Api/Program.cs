@@ -9,6 +9,7 @@ using Verce.Api.Auth;
 using Verce.Api.Authorization;
 using Verce.Api.Cli;
 using Verce.Api.Customers;
+using Verce.Api.Costing;
 using Verce.Api.Inventory;
 using Verce.Api.Outbox;
 using Verce.Api.Settings;
@@ -52,6 +53,7 @@ builder.Services.Configure<Verce.Modules.Settings.BrandAssetStorageOptions>(opti
     options.StorageRoot = effectiveBrandAssetRoot);
 builder.Services.AddScoped<Verce.Modules.Settings.AppSettingValueReader>();
 builder.Services.AddScoped<Verce.Modules.Settings.BrandAssetStorage>();
+builder.Services.AddScoped<Verce.Modules.Costing.ICostingInventoryReader, Verce.Api.Costing.InventoryCostSourceReader>();
 builder.Services.AddHostedService<Verce.Modules.Settings.SettingsSeedService>();
 builder.Services.AddHostedService<Verce.Modules.Inventory.InventorySeedService>();
 
@@ -168,6 +170,7 @@ app.MapOutboxAdminEndpoints();
 app.MapCustomerEndpoints();
 app.MapSettingsEndpoints();
 app.MapSupplyEndpoints();
+app.MapCostingEndpoints();
 
 // ---- Health endpoints (ADR-0012 §25, OPERATIONS §9): status word only, anonymous ----
 app.MapGet("/health/live", () => Results.Text("healthy")).AllowAnonymous();

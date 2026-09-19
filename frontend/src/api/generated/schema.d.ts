@@ -1311,10 +1311,157 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/costing/supplies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    search?: string;
+                    includeInactive: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CostingSupplyListItemResponse"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/costing/supplies/{id}/cost-basis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SupplyCostBasisResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/costing/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CostCalculationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CostCalculationResult"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AdditionalDirectCostBreakdown: {
+            description: string;
+            /** Format: double */
+            amount: number | string;
+        };
         AddressRequest: {
             label: string;
             zipCode: string;
@@ -1464,6 +1611,91 @@ export interface components {
             /** Format: int64 */
             version: number | string;
         };
+        CostCalculationRequest: {
+            materials: null | components["schemas"]["CostingMaterialRequest"][];
+            /** Format: double */
+            defaultWastagePercent: null | number | string;
+            labor: null | components["schemas"]["CostingLaborRequest"];
+            machine: null | components["schemas"]["CostingMachineRequest"];
+            additionalDirectCosts: null | components["schemas"]["CostingAdditionalDirectCostRequest"][];
+            /**
+             * Format: int32
+             * @default 1
+             */
+            outputQuantity: number | string;
+            /** @default false */
+            includeInactiveSupplies: boolean;
+        };
+        CostCalculationResult: {
+            engineVersion: string;
+            materials: components["schemas"]["MaterialCostBreakdown"][];
+            labor: null | components["schemas"]["LaborCostBreakdown"];
+            machine: null | components["schemas"]["MachineCostBreakdown"];
+            additionalDirectCosts: components["schemas"]["AdditionalDirectCostBreakdown"][];
+            totals: components["schemas"]["CostTotals"];
+        };
+        CostingAdditionalDirectCostRequest: {
+            description: string;
+            /** Format: double */
+            amount: number | string;
+        };
+        CostingLaborRequest: {
+            /** Format: double */
+            minutes: number | string;
+            /** Format: double */
+            manualHourlyRateOverride: null | number | string;
+        };
+        CostingMachineRequest: {
+            /** Format: double */
+            minutes: number | string;
+            /** Format: double */
+            hourlyRate: number | string;
+        };
+        CostingMaterialRequest: {
+            /** Format: uuid */
+            supplyId: string;
+            /** Format: double */
+            quantity: number | string;
+            enteredUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: double */
+            wastagePercentOverride: null | number | string;
+            /** Format: double */
+            manualUnitCostOverride: null | number | string;
+        };
+        CostingSupplyListItemResponse: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            baseUnit: components["schemas"]["SupplyBaseUnit"];
+            active: boolean;
+            /** Format: double */
+            currentStockBaseUnit: number | string;
+            policy: string;
+            /** Format: double */
+            weightedAverageUnitCost: null | number | string;
+            costBasisAvailable: boolean;
+        };
+        CostTotals: {
+            /** Format: double */
+            materialCostBeforeWastage: number | string;
+            /** Format: double */
+            materialWastageCost: number | string;
+            /** Format: double */
+            materialsTotalCost: number | string;
+            /** Format: double */
+            laborCost: number | string;
+            /** Format: double */
+            machineCost: number | string;
+            /** Format: double */
+            additionalDirectCosts: number | string;
+            /** Format: double */
+            totalEstimatedCost: number | string;
+            /** Format: int32 */
+            outputQuantity: number | string;
+            /** Format: double */
+            estimatedUnitCost: number | string;
+        };
         CustomerListItemResponse: {
             /** Format: uuid */
             id: string;
@@ -1607,10 +1839,61 @@ export interface components {
             /** Format: int64 */
             supplyVersion: number | string;
         };
+        LaborCostBreakdown: {
+            /** Format: double */
+            minutes: number | string;
+            /** Format: double */
+            hourlyRate: number | string;
+            rateSource: components["schemas"]["LaborRateSource"];
+            /** Format: double */
+            cost: number | string;
+        };
+        /** @enum {unknown} */
+        LaborRateSource: "DEFAULT_SETTING" | "MANUAL_OVERRIDE";
         LoginRequest: {
             email: string;
             password: string;
         };
+        MachineCostBreakdown: {
+            /** Format: double */
+            minutes: number | string;
+            /** Format: double */
+            hourlyRate: number | string;
+            /** Format: double */
+            cost: number | string;
+        };
+        MaterialCostBreakdown: {
+            /** Format: uuid */
+            supplyId: string;
+            supplyCode: string;
+            supplyName: string;
+            /** Format: double */
+            enteredQuantity: number | string;
+            enteredUnit: string;
+            /** Format: double */
+            normalizedQuantityBaseUnit: number | string;
+            baseUnit: string;
+            /** Format: double */
+            wastagePercent: number | string;
+            /** Format: double */
+            effectiveQuantityBaseUnit: number | string;
+            costSource: components["schemas"]["MaterialCostSource"];
+            costPolicy: string;
+            /** Format: double */
+            unitCostBaseUnit: number | string;
+            /** Format: double */
+            costBeforeWastage: number | string;
+            /** Format: double */
+            wastageCost: number | string;
+            /** Format: double */
+            costAfterWastage: number | string;
+            /** Format: double */
+            currentStockBaseUnit: number | string;
+            exceedsCurrentStock: boolean;
+            warnings: string[];
+        };
+        /** @enum {unknown} */
+        MaterialCostSource: "WEIGHTED_AVERAGE_ACQUISITION" | "MANUAL_OVERRIDE";
         /** @enum {unknown} */
         PersonType: "Individual" | "Company";
         PurchaseReceiptRequest: {
@@ -1647,6 +1930,24 @@ export interface components {
             code: string;
             name: string;
             isActive: boolean;
+        };
+        SupplyCostBasisResponse: {
+            /** Format: uuid */
+            supplyId: string;
+            supplyCode: string;
+            supplyName: string;
+            baseUnit: components["schemas"]["SupplyBaseUnit"];
+            active: boolean;
+            /** Format: double */
+            currentStockBaseUnit: number | string;
+            policy: string;
+            /** Format: double */
+            weightedAverageUnitCost: null | number | string;
+            /** Format: double */
+            eligibleQuantityBaseUnit: number | string;
+            /** Format: int32 */
+            eligibleReceiptCount: number | string;
+            available: boolean;
         };
         SupplyCreateRequest: {
             code: string;

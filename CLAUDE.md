@@ -27,6 +27,8 @@ Primary language of code identifiers, database objects and technical docs: **Eng
 3. **Money is never `float`/`double`.** `decimal` in C#, `numeric` in PostgreSQL.
    See [ADR-0002](docs/architecture/ADR-0002-money-precision-and-rounding.md).
 4. **Percentages are stored as fractions** (`0.175000` = 17.5%), never as `17.50`.
+   **Narrow exception:** from S4, `costing.default_wastage_rate` stores percentage points
+   (`5` = 5%) under [ADR-0018](docs/architecture/ADR-0018-s4-stateless-cost-laboratory-and-acquisition-basis.md).
 5. **Historical documents are immutable.** Changing a filament price, a supply cost, an
    energy tariff or a marketplace fee must never change an already-created quote.
    See [ADR-0003](docs/architecture/ADR-0003-cost-and-price-snapshots.md).

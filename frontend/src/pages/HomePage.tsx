@@ -36,6 +36,7 @@ export function HomePage() {
           <nav className="quick-links" aria-label="Módulos disponíveis">
             <Link to="/customers">Clientes</Link>
             <Link to="/supplies">Suprimentos e estoque</Link>
+            <Link to="/cost-laboratory">Laboratório de Custos</Link>
             <Link to="/settings">Configurações e marca</Link>
           </nav>
         </section>

@@ -310,18 +310,19 @@ against a real PostgreSQL host, not mocked).
 **The keystone sprint.** Everything commercial depends on this being right.
 
 - `CostEngine` in `Costing.Domain`: pure, no I/O, implementing
-  [CALCULATION-RULES §1–§6](CALCULATION-RULES.md) exactly, returning a `CostBreakdown` tree.
-- Golden test corpus G1–G3 plus per-rule tests (`CR_01_1_…`) — the acceptance gate for this
-  sprint is the test suite, not the UI.
-- `CostExperiment` aggregate with ad-hoc components, save, clone, recalculate.
-- Energy handled as an input value: estimated from machine power × time, or typed as kWh,
-  priced from the seeded default tariff. **No tariff versioning yet** (S10).
-- Laboratory UI: add/remove filament rows (`+` / trash, unlimited), supplies, manual lines,
-  time, machine, energy; live breakdown panel that shows the arithmetic
-  (`72 g × R$ 89,90/kg = R$ 6,4728`).
-- `CalculationEngineVersion` constant established and persisted with results.
+  S4 Cost Laboratory profile in [CALCULATION-RULES](CALCULATION-RULES.md), returning an
+  explainable breakdown.
+- Generic Supply lines with S3 unit normalization, weighted-average acquisition basis, optional
+  manual simulation override, line/scenario/setting wastage precedence and non-blocking stock
+  warnings.
+- Labor, manually rated machine time, additional direct costs, batch output and estimated unit
+  cost. Energy, Printer, Product, Recipe, Production and sale-price concepts remain future scope.
+- Stateless Laboratory UI with add/remove material and direct-cost lines; no IDs, persistence,
+  save/clone/history or conversion (no Costing schema; ADR-0018's targeted Settings data migration is separate).
+- Engine version `1.0.0` returned with each result; generated OpenAPI DTOs are the frontend source.
 
-**Exit:** the CR-06.5 worked example reproduces to the last decimal in engine, API and UI.
+**Exit:** required arithmetic examples, real PostgreSQL acquisition basis, authorization,
+side-effect absence, API/UI workflows and full regression gates are green.
 
 ---
 

@@ -298,22 +298,23 @@ Sorting: date, value (`total_amount`), status, customer name.
 
 ## 5. Policies
 
-### Purchase cost policy (deferred to S4) <a id="purchase-cost-policy-deferred-to-s4"></a>
+### Purchase cost policy (implemented in S4) <a id="purchase-cost-policy-deferred-to-s4"></a>
 
 S3 records a `PurchaseReceipt` movement's `UnitCostSnapshot`/`TotalCostSnapshot` and caches the
 latest one on `Supply.LatestPurchaseUnitCost` — **last purchase only**, purely informational (see
-[ADR-0017 §5](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md)). S3 makes **no**
-choice between an actual costing policy:
+[ADR-0017 §5](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md)). S4 does not read
+that cache. It implements `WEIGHTED_AVERAGE_ACQUISITION` over immutable, positive, cost-bearing
+`PurchaseReceipt` movements: `Σ(quantity_base × unit_cost_base) / Σ(quantity_base)`, rounded to
+six decimal places. Manual increases/decreases/corrections, current stock and costless purchases
+do not participate. This is an acquisition estimate, not a moving average of remaining stock.
 
-| Policy | Behaviour | Status |
-|---|---|---|
-| `LAST_PURCHASE` | The most recent purchase's unit cost is what costing reads | S3's *de facto* snapshot behaviour, not yet a chosen policy |
-| `MANUAL` | An operator sets the costing unit cost independently of purchase history | Open |
-| `WEIGHTED_AVERAGE` | Costing unit cost = value-weighted average of remaining stock | Open — requires consumption tracking the Production module does not exist to provide yet |
+No eligible purchase yields `COST_BASIS_UNAVAILABLE`. A calculation line may instead provide a
+non-negative manual cost per base unit; the result source and policy are both explicit as
+`MANUAL_OVERRIDE`, and no Supply or movement is modified.
 
-Whichever policy S4 chooses, it must not retroactively change a quote or production order already
-costed — the same historical-immutability rule as everywhere else in this product
-([ADR-0006](architecture/ADR-0006-estimated-vs-actual-cost.md)).
+The S4 cost result itself is transient (no Costing schema): entered quantities retain up to eight
+decimal places, normalized/effective quantities use four, and component/totals use six internal
+money places while the UI displays BRL with two. See ADR-0018.
 
 ### Price rounding policy
 *(setting `pricing.price_rounding_policy`)* — see

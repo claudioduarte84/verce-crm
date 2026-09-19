@@ -26,7 +26,7 @@ public static class SettingCatalog
         Choice("pricing.price_rounding_policy", "CENT", "pricing", "Política de arredondamento", "CENT", "TEN_CENTS", "WHOLE", "NINETY_NINE", "NONE"),
         Decimal("pricing.margin_warning_denominator", "0.10", "pricing", "Denominador de alerta", _ => true),
         Decimal("costing.default_labor_hourly_rate", "0.00", "costing", "Mão de obra padrão", value => value >= 0),
-        Decimal("costing.default_wastage_rate", "0.00", "costing", "Perda padrão", value => value >= 0 && value < 1),
+        Decimal("costing.default_wastage_rate", "0.00", "costing", "Perda padrão em pontos percentuais (0 a 100; ADR-0018)", value => value is >= 0 and <= 100),
         Decimal("energy.overhead_factor", "0.00", "energy", "Fator de overhead", value => value >= 0),
         Choice("inventory.filament_price_policy", "LAST_PURCHASE", "inventory", "Política de preço de filamento", "LAST_PURCHASE", "MANUAL"),
         Choice("ui.default_theme", "verce-default", "ui", "Tema padrão", "verce-default"),
@@ -75,6 +75,22 @@ public static class SettingCatalog
 
 public sealed class AppSettingValueReader(VerceDbContext db)
 {
+    public async Task<decimal> GetDecimalAsync(string key, CancellationToken cancellationToken)
+    {
+        var definition = SettingCatalog.GetRequired(key);
+        if (definition.ValueType != AppSettingValueType.Decimal) throw new ArgumentException("SETTING_TYPE_INVALID");
+        var tracked = db.Set<AppSetting>().Local.SingleOrDefault(item => item.Key == definition.Key);
+        var value = tracked?.Value ?? await db.Set<AppSetting>().AsNoTracking()
+            .Where(item => item.Key == definition.Key)
+            .Select(item => item.Value)
+            .SingleOrDefaultAsync(cancellationToken) ?? definition.DefaultValue;
+        var normalized = SettingCatalog.Validate(definition.Key, value, definition.ValueType);
+        if (!decimal.TryParse(normalized, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                CultureInfo.InvariantCulture, out var parsed))
+            throw new InvalidOperationException("SETTING_VALUE_INVALID");
+        return parsed;
+    }
+
     public async Task<long> GetMaximumImageBytesAsync(CancellationToken cancellationToken)
     {
         var definition = SettingCatalog.GetRequired("uploads.max_image_bytes");

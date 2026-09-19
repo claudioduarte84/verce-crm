@@ -46,3 +46,17 @@ export type InventoryMovementListResponse = Schemas['InventoryMovementListRespon
 export type InitialBalanceRequest = Schemas['InitialBalanceRequest']
 export type PurchaseReceiptRequest = Schemas['PurchaseReceiptRequest']
 export type InventoryAdjustmentRequest = Schemas['InventoryAdjustmentRequest']
+
+// ---- S4: Cost Engine & Laboratory ----
+export type CostCalculationRequest = Schemas['CostCalculationRequest']
+export type CostCalculationResult = Schemas['CostCalculationResult']
+export type CostingMaterialRequest = Schemas['CostingMaterialRequest']
+export type CostingLaborRequest = Schemas['CostingLaborRequest']
+export type CostingMachineRequest = Schemas['CostingMachineRequest']
+export type CostingAdditionalDirectCostRequest = Schemas['CostingAdditionalDirectCostRequest']
+export type CostingSupplyListItemResponse = Schemas['CostingSupplyListItemResponse']
+export type MaterialCostBreakdown = Schemas['MaterialCostBreakdown']
+export type LaborCostBreakdown = Schemas['LaborCostBreakdown']
+export type MachineCostBreakdown = Schemas['MachineCostBreakdown']
+export type AdditionalDirectCostBreakdown = Schemas['AdditionalDirectCostBreakdown']
+export type CostTotals = Schemas['CostTotals']

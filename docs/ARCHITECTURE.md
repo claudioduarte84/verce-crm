@@ -89,7 +89,7 @@ channels and fee rules belong to **Pricing**.
 | 1 | **Customers** | Customer, CustomerAddress | Anything commercial |
 | 2 | **Catalog** | Product, ProductRecipe and its components (BOM), product images | Material master data, prices |
 | 3 | **Inventory** | Supply (optionally carrying FilamentDetails), SupplyCategory, InventoryMovement (append-only ledger) | Product recipes, actual costing policy |
-| 4 | **Costing** | CostEngine, CostBreakdown, CostExperiment (Laboratory), cost snapshots | Selling price |
+| 4 | **Costing** | Pure CostEngine and transient CostBreakdown (S4 Laboratory) | Selling price, persistence, recipes, production, energy |
 | 5 | **Pricing** | SalesChannel, FeeRule, FeeRuleVersion, PriceBracket, PricingEngine | Cost computation |
 | 6 | **Quoting** | Quote, QuoteRevision, QuoteItem, snapshots, status history, numbering | Production, sales |
 | 7 | **Sales** | Sale, SaleItem (the financial record of a closed deal) | Quote lifecycle |
@@ -349,7 +349,7 @@ lock on its job key so two instances never overlap.
 ## 7. Calculation architecture
 
 The cost and price engines are **pure, deterministic, side-effect-free** classes in
-`Costing.Domain` and `Pricing.Domain`. They take a fully materialized input record and return
+their module assemblies. They take a fully materialized input record and return
 a breakdown. They never query the database, never read the clock, never read configuration
 directly.
 
@@ -363,14 +363,20 @@ CostInput  ──► CostEngine  ──► CostBreakdown  ──► PricingEngin
  rates)
 ```
 
-Resolution of "which price/tariff/fee applies at instant *t*" happens in the Application
-layer (`CostInputBuilder`, `FeeRuleResolver`) **before** the engine runs, so the engine has no
+Resolution of settings and inventory acquisition basis happens in the API application adapter
+**before** the S4 engine runs, so the engine has no
 temporal dependency and is trivially unit-testable. This separation is what makes snapshots
 possible: the resolved input *is* the snapshot.
 
-Both engines carry a `CalculationEngineVersion` constant persisted with every snapshot, so a
-future formula change can be detected rather than silently reinterpreting old records.
+The S4 engine returns its `EngineVersion` (`1.0.0`) with every transient result. S4 persists no
+calculation or snapshot (no Costing schema); the targeted Settings compatibility data migration is
+documented in ADR-0018. A future persistence boundary must copy that version
+alongside any immutable snapshot rather than recalculating history.
 See [CALCULATION-RULES](CALCULATION-RULES.md).
+
+The Costing assembly references only SharedKernel. The API composition root is the adapter that
+reads `Supply`/`InventoryMovement` and `AppSetting`, reuses `SupplyUnitConversion`, and materializes
+the pure input. This preserves module boundaries and prevents Inventory↔Costing cycles.
 
 ---
 

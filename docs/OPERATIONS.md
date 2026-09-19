@@ -406,6 +406,15 @@ if (env.IsDevelopment())
 | Missing wrapping material | starts normally | **fails to start** |
 | Bootstrap secret | optional | required |
 
+### 7.1 E2E harness — disposable PostgreSQL target
+
+The Playwright suite under `tests/e2e/` is destructive (it creates/drops real databases and runs
+real SQL) and requires its own isolated PostgreSQL container — **never** `verce-postgres`, and
+never the `verce` database on any server. `VERCE_E2E_POSTGRES_CONTAINER` is mandatory (no
+fallback), ambiguous connection strings are refused rather than guessed, and the protected
+container is rejected by name, full Docker ID or short Docker ID alike. See
+[`tests/e2e/README.md`](../tests/e2e/README.md) for the full local-workflow and CI contract.
+
 ---
 
 ## 8. Outbox operations

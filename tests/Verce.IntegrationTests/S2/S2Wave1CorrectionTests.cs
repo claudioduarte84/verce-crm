@@ -126,7 +126,7 @@ public sealed partial class S2HttpIntegrationTests
     [InlineData("pricing.default_margin_percent", "1")]
     [InlineData("pricing.price_rounding_policy", "UNKNOWN")]
     [InlineData("costing.default_labor_hourly_rate", "-0.01")]
-    [InlineData("costing.default_wastage_rate", "1")]
+    [InlineData("costing.default_wastage_rate", "101")]
     [InlineData("energy.overhead_factor", "-1")]
     [InlineData("inventory.filament_price_policy", "WEIGHTED_AVERAGE")]
     [InlineData("ui.default_theme", "unknown")]

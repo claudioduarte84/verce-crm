@@ -18,14 +18,15 @@ Related: [ADR-0002 Money, Precision and Rounding](architecture/ADR-0002-money-pr
 | Presented money (unit price, line total, document totals) | `decimal` | `numeric(18,2)` | 2 |
 | Intermediate money (component cost, cost per gram, unit cost) | `decimal` | `numeric(18,6)` | 6 |
 | Price per kilogram | `decimal` | `numeric(18,6)` | 6 |
-| Percent (commission, margin, wastage) | `decimal` | `numeric(9,6)` | 6, stored as **fraction** |
+| Percent (commission, margin) | `decimal` | `numeric(9,6)` | 6, stored as **fraction** |
+| S4 Laboratory wastage input | `decimal` | scenario/line overrides not persisted; global Setting is persisted | percentage points 0–100; divide by 100 in formula |
 | Weight in grams | `decimal` | `numeric(12,3)` | 3 |
 | Weight in kilograms | derived, never stored | — | — |
 | Energy | `decimal` | `numeric(12,4)` | 4 (kWh) |
 | Power | `int` | `integer` | watts |
 | Quantity | `decimal` | `numeric(14,4)` | 4 |
 | Duration | `int` | `integer` | seconds |
-| Labor time | `int` | `integer` | minutes |
+| S4 Laboratory labor/machine time | `decimal` | not persisted | minutes |
 
 Constants in `Verce.SharedKernel`:
 ```csharp
@@ -65,185 +66,176 @@ database = screen.
 
 ### CR-00.4 — Engine version
 
-`CalculationEngineVersion` is a constant (`"1.0.0"` at S4) persisted on every snapshot and
-every experiment result. It changes whenever a rule in this document changes semantics.
-Old snapshots are **never recomputed**; they are read as-is and rendered with a note when the
-engine version differs from current.
+`CostEngine.Version` is `"1.0.0"` at S4 and is returned on every transient Laboratory result.
+S4 has no experiment/snapshot persistence. When a future sprint persists a cost snapshot, it
+must copy this version and must never recompute old snapshots.
 
 ---
 
-## 1. Filament cost
+## 1–6. Legacy S3/S5–S10 specification (preserved; not implemented by S4)
+
+The following pre-S4 rule IDs and meanings are retained verbatim in intent. S4 does not implement
+or redefine them; its transient laboratory rules begin at CR-13.
 
 ### CR-01.1 — Single filament component
-```
-componentCost = round6( gramsUsed / 1000 * pricePerKg )
-```
-
-Worked example (the canonical case):
-```
-PLA Preto Eclipse · 72 g · R$ 89,90/kg
-72 / 1000 = 0,072
-0,072 × 89,90 = 6,47280
-componentCost = R$ 6,472800
-```
+`componentCost = round6(gramsUsed / 1000 × pricePerKg)`. Canonical G1 is 72 g at R$ 89,90/kg =
+R$ 6,472800.
 
 ### CR-01.2 — Multiple components
-```
-filamentCost = round6( Σ componentCost[i] )
-```
-There is **no limit** on the number of filament components.
-
-Example:
-```
-PLA Preto   72 g @ 89,90/kg → 6,472800
-PLA Laranja 18 g @ 94,50/kg → 1,701000
-filamentCost = 8,173800
-```
+`filamentCost = round6(Σ componentCost[i])`; there is no component limit. Canonical G2 is
+72 g at R$ 89,90/kg plus 18 g at R$ 94,50/kg = R$ 8,173800.
 
 ### CR-01.3 — Price resolution
-`pricePerKg` is `Filament.CurrentPricePerKg` **resolved at the calculation instant** and then
-frozen into the snapshot. It is never re-read for an existing quote.
+`pricePerKg` is resolved at calculation instant and frozen in the later snapshot; it is not reread
+for an existing quote.
 
 ### CR-01.4 — Explainability
-Each component must render as
-`{filamentName} · {grams} g × R$ {pricePerKg}/kg = R$ {componentCost}`.
+Each legacy component renders `{filamentName} · {grams} g × R$ {pricePerKg}/kg = R$ {componentCost}`.
 
----
+### CR-02.1 — Supply component cost
+`supplyComponentCost = round6(quantity × unitCostAtInstant)`; e.g. 4 units at R$ 0,35 = R$ 1,400000.
 
-## 2. Supply cost
-
-### CR-02.1
-```
-supplyComponentCost = round6( quantity * unitCostAtInstant )
-```
-Example: Argola 4 un × R$ 0,35 = R$ 1,400000.
-
-### CR-02.2 — Grouping
-```
-packagingCost = round6( Σ cost where supply.category.kind = PACKAGING )
-suppliesCost  = round6( Σ cost where supply.category.kind ≠ PACKAGING )
-```
-Packaging is separated for reporting only; both enter the direct cost identically.
+### CR-02.2 — Supply grouping
+`packagingCost = round6(Σ PACKAGING)` and `suppliesCost = round6(Σ non-PACKAGING)`; both enter
+direct cost identically.
 
 ### CR-02.3 — Unit consistency
-`quantity.Unit` must equal `supply.Unit`. A mismatch is rejected at recipe/experiment
-construction, not silently converted.
+The recipe/experiment input unit must equal the supply unit; mismatch is rejected, never converted.
 
----
+### CR-03.1 — Manual cost lines
+`manualCost = round6(Σ line.Amount)`; manual lines are money and are not multiplied by quantity.
 
-## 3. Manual cost lines
+### CR-04.1 — Machine hourly rate (future S9)
+`machineHourlyRate = hourlyRateOverride ?? round6((acquisitionCost / expectedLifetimeHours ?? 0) + (maintenanceCostPerHour ?? 0))`.
+Missing components contribute zero. This remains a future specification; S4's manual scenario
+machine rate is not this derivation.
 
-### CR-03.1
-```
-manualCost = round6( Σ line.Amount )
-```
-Manual lines are already money; they are not multiplied by anything. A manual line meant to
-scale with quantity must be expressed as a supply.
+### CR-04.2 — Machine cost per unit (future S9)
+`printHours = printDurationSeconds / 3600` (unrounded) and
+`machineCost = round6(printHours × machineHourlyRate)`.
 
----
+### CR-05.1 — Estimated kWh (future S10)
+`effectivePowerWatts = machine.AveragePowerWatts ?? machine.NominalPowerWatts` and
+`estimatedKwh = round4(effectivePowerWatts / 1000 × printHours × (1 + energyOverheadFactor))`.
 
-## 4. Machine cost
+### CR-05.2 — kWh precedence (future S10)
+`EnergyConsumptionSession` (ACTUAL/SMART_PLUG/MANUAL), then explicit recipe estimate, then
+CR-05.1 machine-power estimate. The selected source is recorded in the future breakdown.
 
-### CR-04.1 — Hourly rate
-```
-machineHourlyRate =
-    hourlyRateOverride
-    ?? round6( (acquisitionCost / expectedLifetimeHours ?? 0) + (maintenanceCostPerHour ?? 0) )
-```
-Missing components contribute 0. A machine with no cost data yields rate 0, which is a legal
-"I do not track machine cost yet" configuration.
-
-### CR-04.2 — Machine cost per unit
-```
-printHours   = printDurationSeconds / 3600            (decimal, not rounded)
-machineCost  = round6( printHours * machineHourlyRate )
-```
-Example: 3 h 25 min = 12 300 s → 3,416666… h × R$ 1,20/h = R$ 4,100000.
-
----
-
-## 5. Energy cost
-
-### CR-05.1 — Estimated kWh (when not measured and not overridden)
-```
-effectivePowerWatts = machine.AveragePowerWatts ?? machine.NominalPowerWatts
-estimatedKwh = round4( effectivePowerWatts / 1000 * printHours * (1 + energyOverheadFactor) )
-```
-`energyOverheadFactor` (setting `energy.overhead_factor`, default 0) covers bed heating spikes,
-enclosure, drying — it is a blunt correction, documented as such.
-
-### CR-05.2 — kWh precedence
-```
-1. EnergyConsumptionSession for this production item   → source ACTUAL / SMART_PLUG / MANUAL
-2. recipe.EstimatedEnergyKwh (explicit override)       → source ESTIMATED_OVERRIDE
-3. CR-05.1 machine-power estimate                      → source ESTIMATED
-```
-The chosen source is always recorded in the breakdown.
-
-### CR-05.3 — Cost
-```
-energyCost = round6( kwh * tariffPricePerKwh )
-```
-`tariffPricePerKwh` comes from the `EnergyTariffVersion` valid at the calculation instant, and
-its `Id` is stored in the snapshot.
-
-Example: 0,21 kWh × R$ 0,92/kWh = R$ 0,193200.
-
----
-
-## 6. Total cost
+### CR-05.3 — Energy cost (future S10)
+`energyCost = round6(kwh × tariffPricePerKwh)`, with the tariff version valid at calculation time.
 
 ### CR-06.1 — Labor
-```
-laborCost = round6( laborMinutes / 60 * laborHourlyRate )
-```
+`laborCost = round6(laborMinutes / 60 × laborHourlyRate)`.
 
 ### CR-06.2 — Direct cost
-```
-directCost = round6(
-      filamentCost
-    + suppliesCost
-    + packagingCost
-    + manualCost
-    + energyCost
-    + machineCost
-    + laborCost )
-```
+`directCost = round6(filamentCost + suppliesCost + packagingCost + manualCost + energyCost + machineCost + laborCost)`.
 
 ### CR-06.3 — Wastage
-Wastage models failed prints and material loss. Its base is **material only** — labor, machine
-and energy of a failed print are real losses too, but attributing them here would double count
-against the machine rate, and the operator reasons about wastage as "I lose filament".
-
-```
-wastageBase = filamentCost + suppliesCost + packagingCost
-wastageCost = round6( wastageBase * wastageRate )
-```
+`wastageBase = filamentCost + suppliesCost + packagingCost` and
+`wastageCost = round6(wastageBase × wastageRate)`; labor/machine/energy are excluded.
 
 ### CR-06.4 — Unit and batch cost
-```
-unitTotalCost  = round6( directCost + wastageCost )
-batchTotalCost = round6( unitTotalCost * quantity )
-```
-`quantity` is the number of units. Costs are always computed **per unit** first; a per-batch
-cost is never the primary figure, because pricing is per unit.
+`unitTotalCost = round6(directCost + wastageCost)` and
+`batchTotalCost = round6(unitTotalCost × quantity)`; legacy costs are calculated per unit first.
 
-### CR-06.5 — Worked example (the Laboratory case from the brief)
+### CR-06.5 — Legacy laboratory worked example
+84 g PLA at R$ 89,90/kg + 22 g at R$ 94,50/kg + manual R$ 0,40 + 4 supplies at R$ 0,18 +
+0,21 kWh at R$ 0,92 + 3 h 25 min at R$ 1,20/h produces `directCost = unitTotalCost = R$ 15,043800`
+at 0% wastage. This is G3, the defined base for G4/G5/G8/G9.
+
+## 13. S4 Cost Laboratory (implemented)
+
+### CR-13.1 — Generic Supply lines
+
+Every material line references one `Supply`; filament and packaging are not separate costing
+types. Duplicate Supply lines are legal and remain distinct in input and output.
+
+### CR-13.2 — Entered and base quantities
+
+Entered quantity is positive and represented with at most eight decimal places. The API calls
+S3's closed `SupplyUnitConversion.NormalizePositive`; normalized base quantity uses four decimal
+places. Incompatible units and positive quantities that normalize to zero are rejected.
+
+### CR-13.3 — Weighted average acquisition
+
+Only positive, cost-bearing `PurchaseReceipt` movements are eligible:
+
+```text
+weightedUnitCost = round6(
+    Σ(quantityDeltaBaseUnit × unitCostSnapshot)
+    / Σ(quantityDeltaBaseUnit))
 ```
-PLA Preto   84 g @ R$ 89,90/kg  →  0,084 × 89,90        = 7,551600
-PLA Laranja 22 g @ R$ 94,50/kg  →  0,022 × 94,50        = 2,079000
-  filamentCost                                           = 9,630600
-Cola (manual line)                                       = 0,400000
-Parafuso 4 un @ R$ 0,18                                  = 0,720000
-  suppliesCost                                           = 0,720000
-  manualCost                                             = 0,400000
-Energia 0,21 kWh @ R$ 0,92                               = 0,193200
-Máquina 3 h 25 min @ R$ 1,20/h → 3,416667 × 1,20         = 4,100000
-Mão de obra 0 min                                        = 0,000000
-  directCost                                             = 15,043800
-Perda 0%                                                 = 0,000000
-  unitTotalCost                                          = R$ 15,043800
+
+Example: 1,000 g costing R$ 100 plus 500 g costing R$ 75 gives
+`round6(175 / 1500) = R$ 0.116667/g`. Manual adjustments do not affect the basis.
+
+### CR-13.4 — Missing basis and manual simulation
+
+Without an eligible receipt, the line fails with `COST_BASIS_UNAVAILABLE`. An optional manual
+cost per base unit takes precedence and is returned as `MANUAL_OVERRIDE`; it never updates the
+Supply or ledger. Otherwise the source/policy is `WEIGHTED_AVERAGE_ACQUISITION`.
+
+### CR-13.5 — Wastage precedence and bounds
+
+Wastage is percentage points in the inclusive range 0–100. Precedence is:
+
+```text
+line override > scenario default > costing.default_wastage_rate
 ```
+
+### CR-13.6 — Effective quantity and material costs
+
+```text
+effectiveQuantity = round4(normalizedRequired × (1 + wastagePercent / 100))
+costBeforeWastage = round6(normalizedRequired × unitCostBase)
+costAfterWastage  = round6(effectiveQuantity × unitCostBase)
+wastageCost       = round6(costAfterWastage - costBeforeWastage)
+```
+
+Example: 100 g at R$ 0.10/g with 5% waste gives 105 g, R$ 10 before waste,
+R$ 0.50 waste and R$ 10.50 after waste.
+
+### CR-13.7 — Labor
+
+`laborCost = round6(laborMinutes / 60 × laborHourlyRate)`. A manual hourly rate wins over
+`costing.default_labor_hourly_rate`; the result identifies `MANUAL_OVERRIDE` or
+`DEFAULT_SETTING`. Example: 30 minutes at R$ 40/hour = R$ 20.
+
+### CR-13.8 — Machine
+
+`machineCost = round6(machineMinutes / 60 × machineHourlyRate)`. Both values are manual S4
+scenario inputs. The hourly rate may encompass the operator's chosen operational allowance;
+S4 has no Printer, depreciation or energy formula. Example: 120 minutes at R$ 3/hour = R$ 6.
+
+### CR-13.9 — Additional direct costs
+
+`additionalDirectCosts = round6(Σ amount)`. Each non-negative amount has a required description.
+
+### CR-13.10 — Totals and output quantity
+
+```text
+materialsTotal = round6(Σ material.costAfterWastage)
+totalEstimated = round6(materialsTotal + laborCost + machineCost + additionalDirectCosts)
+estimatedUnit  = round6(totalEstimated / outputQuantity)
+```
+
+`outputQuantity` is an integer from 1 through 1,000,000. Example: a R$ 125 batch with output 10
+has estimated unit cost R$ 12.500000. At least one material, positive-time labor/machine or
+positive additional cost is required; otherwise `COST_CALCULATION_EMPTY` is returned.
+
+### CR-13.11 — Stock is advisory
+
+If effective material quantity exceeds current stock, the line contains
+`REQUESTED_QUANTITY_EXCEEDS_CURRENT_STOCK`; calculation succeeds. A calculation never changes
+Supply stock/version, creates an InventoryMovement, writes a setting or emits an audit row.
+
+### CR-13.12 — Backend is authoritative
+
+Every line returns Supply identity, entered and normalized quantities/units, wastage/effective
+quantity, cost source/policy/rate, before/waste/after costs and stock warning. Totals are returned
+by the backend. The frontend formats those values as BRL with two decimal places and performs no
+authoritative monetary calculation.
 
 ---
 
@@ -448,7 +440,7 @@ marginVariance = realizedMargin - effectiveMarginAtQuote
 
 ---
 
-## 10. Purchase cost derivation *(implemented S3, as an informational snapshot — not yet a costing policy)*
+## 10. Purchase cost derivation and S4 acquisition policy
 
 > **Supersedes the original per-lot design below.** S3 delivered `Supply`/`InventoryMovement`
 > instead of a `Filament`/`FilamentLot` pair — see
@@ -469,14 +461,13 @@ input is rejected as `QUANTITY_BELOW_BASE_PRECISION` before any cost division. `
 the most recent `unitCostSnapshot`; it is **not** a weighted average and is never recomputed from
 older movements.
 
-### CR-10.2 — Current price policy (`inventory.filament_price_policy`) — **deferred to S4**
+### CR-10.2 — S4 cost policy
 ```
-LAST_PURCHASE  → S3's de facto behaviour (CR-10.1) — not yet a chosen costing policy
-MANUAL         → open
-WEIGHTED_AVERAGE → open — requires consumption tracking the Production module does not exist to provide yet
+WEIGHTED_AVERAGE_ACQUISITION → CR-13.3, estimated from immutable purchase receipts
+MANUAL_OVERRIDE              → per-line what-if value, no persistence or ledger mutation
 ```
-Whichever policy S4 chooses, it must not retroactively change a quote or production order already
-costed ([ADR-0006](architecture/ADR-0006-estimated-vs-actual-cost.md)).
+This does not claim moving-average remaining-stock valuation, FIFO/LIFO, accounting cost or
+actual consumption. See ADR-0018.
 
 ---
 
@@ -576,5 +567,25 @@ margin on R$ 300,00. The UI shows both columns and sorts by profit by default.
 | G10 | Estimated 90 g vs actual 96 g | +6 g, +0,066667 |
 | G11 | 3 decided quotes, 1 approved | 0,333333 |
 | G12 | 0 decided quotes | `null` |
+| G13 | Weighted acquisition: 100 g @ 0,116667/base + 5% waste | material total 12,250035 |
+| G14 | 100 g @ 0,10/base + 5% S4 percentage-point waste | material total 10,500000 |
+| G15 | 30 S4 labor minutes @ 0 manual/hour | `MANUAL_OVERRIDE`, 0,000000 |
+| G16 | 120 S4 machine minutes @ 3/hour | machine 6,000000 |
+| G17 | S4 batch total 39,95, output 2 | estimated unit 19,975000 |
+| G18 | S4 two-material labor/machine/additional scenario | total estimated 39,950000 |
+| G19 | S4 manual material cost override | source `MANUAL_OVERRIDE` |
 
 G4 check: `15,0438 / (1 - 0,35) = 23,1443…` → `23,14`.
+
+## 14. S4 rule coverage matrix
+
+| Rule | Named test |
+|---|---|
+| CR-13.1 / CR-13.2 | `CR_13_1_G13_weighted_acquisition_input_is_costed_without_changing_its_basis` |
+| CR-13.3 / CR-13.4 | `CR_13_7_G19_manual_material_override_is_explicit` |
+| CR-13.5 / CR-13.6 | `CR_13_2_G14_material_wastage_uses_percentage_points`; `CR_13_2_explicit_zero_wastage_does_not_fall_back_to_default` |
+| CR-13.7 | `CR_13_3_G15_labor_uses_manual_zero_rate_as_a_real_override` |
+| CR-13.8 | `CR_13_4_G16_machine_cost_uses_decimal_minutes_over_sixty` |
+| CR-13.9 | `CR_13_8_negative_additional_amount_is_rejected` |
+| CR-13.10 | `CR_13_5_G17_batch_division_retains_six_decimal_places`; `CR_13_6_G18_multi_material_full_costing_is_reconciled` |
+| CR-13.11 / CR-13.12 | `Effective_quantity_above_stock_warns_but_still_calculates` |

@@ -122,7 +122,7 @@ expired one.
 |---|---|
 | `Owner` | Everything, including settings, fee rules, AI configuration, user management |
 | `Operator` | Customers, products, supplies and inventory, quotes, production, sales, expenses, documents |
-| `Viewer` | Read-only across the app; no exports of full customer lists |
+| `Viewer` | Read-only across the app; may execute stateless analytical cost calculations; no exports of full customer lists |
 
 ### 3.2 Mechanism
 
@@ -139,6 +139,12 @@ public static class Permissions
     // …
 }
 ```
+
+S4 maps `costing:read` and `costing:calculate` to Owner, Operator and Viewer. Calculation is
+available to Viewer because it is a transient analytical operation: it creates no audit record,
+does not write settings and cannot mutate stock. The state-changing HTTP verb still requires the
+same-origin antiforgery token. Anonymous callers receive 401. Inactive supplies are absent from
+the default picker and require an explicit request path/flag for historical analysis.
 Endpoints require a permission policy. Adding a fourth role later means editing the mapping,
 not hunting through endpoints. Every endpoint is authenticated **by default**
 (`RequireAuthorization()` on the root route group); anonymous access is an explicit,

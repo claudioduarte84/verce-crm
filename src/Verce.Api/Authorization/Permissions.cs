@@ -14,6 +14,8 @@ public static class Permissions
     public const string SuppliesManage = "supplies:manage";
     public const string InventoryRead = "inventory:read";
     public const string InventoryManage = "inventory:manage";
+    public const string CostingRead = "costing:read";
+    public const string CostingCalculate = "costing:calculate";
     public static void AddPolicies(Microsoft.AspNetCore.Authorization.AuthorizationOptions options)
     {
         options.AddPolicy(CustomersRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
@@ -24,5 +26,7 @@ public static class Permissions
         options.AddPolicy(SuppliesManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
         options.AddPolicy(InventoryRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
         options.AddPolicy(InventoryManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
+        options.AddPolicy(CostingRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
+        options.AddPolicy(CostingCalculate, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
     }
 }
