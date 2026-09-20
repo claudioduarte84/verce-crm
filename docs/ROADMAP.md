@@ -328,20 +328,32 @@ side-effect absence, API/UI workflows and full regression gates are green.
 
 ## S5 — Product BOM & Pricing
 
-- `Product` + versioned `ProductRecipe` with filament/supply/manual components and process
-  parameters; recipe immutability once used; "edit creates revision N+1".
-- `CostInputBuilder`: resolves a recipe into a `CostInput` at an instant (this is where
-  snapshot values come from).
-- `PricingEngine` in `Pricing.Domain`: the single formula, denominator guard, rounding policy,
-  fee clamps, bracket resolution algorithm (CR-07.5) — golden tests G4–G9.
-- `FeeRule` / `FeeRuleVersion` / `PriceBracket` with the temporal exclusion constraints;
-  `FeeRuleResolver`.
-- `CostExperiment.ConvertToProduct`.
-- UI: product form with BOM editor; per-channel suggested price panel showing cost, fee,
-  margin, price and profit side by side.
+See [ADR-0019](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md) for the scope
+decisions behind what actually shipped, which is narrower than this section originally
+described (no `CostExperiment.ConvertToProduct` — S4 never built that aggregate; no versioned
+recipe history; no `PriceBracket` — both deferred until a real consumer exists).
 
-**Exit:** `PRICING_INVALID_DENOMINATOR` is impossible to bypass; effective margin equals
-desired margin under CR-08.5 conditions.
+- `Product` (AR) with a single **current-state** `ProductRecipe` (1:1) carrying generic
+  `ProductRecipeMaterialLine`/`ProductRecipeAdditionalCostLine` children — no filament/supply
+  split, no revision fork on edit. `RevisionNumber` is kept fixed at `1`, a placeholder for a
+  future fork mechanism S6/S9 will define.
+- `ProductCostCalculator` (API-layer, not domain): translates a persisted recipe into S4's
+  `CostCalculationInput` and calls the **unmodified** `Costing.CostEngine` — the S4 engine is
+  reused byte-for-byte, never reimplemented.
+- `PricingEngine` in `Verce.Modules.Pricing`: the single formula, denominator guard, five
+  rounding policies (CR-07.4), fee min/max clamps — the full P1–P10 golden corpus. Bracket
+  resolution (CR-07.5) remains unbuilt, exactly as CR-07.5 already said ("not used before S8").
+- `SalesChannel` (AR) + `FeeRule` (AR, exactly one per channel) + `FeeRuleVersion` (*E*) with the
+  temporal exclusion constraint (`EXCLUDE USING gist`, `btree_gist`); `FeeRule.ResolveVersionAt`.
+  No `AppliesTo`/`Priority`/`PriceBracket` — S8 scope. "Venda Direta" seeded as a zero-fee
+  channel at first boot; direct sale resolves through the same code path as any marketplace.
+- UI: Product list/create/edit, recipe editor (multi-material lines, Supply search/selection,
+  labor/machine/additional-cost inputs, current-cost display), Pricing screen (channel/fee-rule
+  management, ad-hoc calculator, per-product per-channel suggested price).
+
+**Exit:** `PRICING_INVALID_DENOMINATOR` is impossible to bypass; a persisted recipe's cost
+matches a manual Cost Laboratory calculation with the same inputs exactly; fee-rule version
+overlap is rejected by the database, never by application code alone.
 
 ---
 

@@ -1453,6 +1453,760 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    search?: string;
+                    status?: components["schemas"]["ProductListStatus"];
+                    page?: number | string;
+                    pageSize?: number | string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductListResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProductCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/products/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProductUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/products/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query: {
+                    version: number | string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/products/{id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query: {
+                    version: number | string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/products/{id}/recipe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProductRecipeUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/products/{id}/cost": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CostCalculationResult"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pricing/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    includeInactive?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesChannelResponse"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SalesChannelCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesChannelResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pricing/channels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesChannelResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SalesChannelUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SalesChannelResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pricing/channels/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query: {
+                    version: number | string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pricing/channels/{id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query: {
+                    version: number | string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pricing/channels/{channelId}/fee-rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    channelId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FeeRuleResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    channelId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["FeeRuleCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FeeRuleResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pricing/channels/{channelId}/fee-rule/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    channelId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["FeeRuleVersionCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FeeRuleResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pricing/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PricingCalculateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PricingCalculateResponse"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pricing/products/{productId}/price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    productId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProductPriceRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProductPriceResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1743,6 +2497,55 @@ export interface components {
             version: number | string;
             addresses: components["schemas"]["AddressResponse"][];
         };
+        FeeRuleCreateRequest: {
+            name: string;
+        };
+        FeeRuleResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            salesChannelId: string;
+            name: string;
+            active: boolean;
+            /** Format: int64 */
+            version: number | string;
+            versions: components["schemas"]["FeeRuleVersionResponse"][];
+        };
+        FeeRuleVersionCreateRequest: {
+            /** Format: date */
+            validFrom: string;
+            /** Format: date */
+            validUntil: null | string;
+            /** Format: double */
+            commissionPercent: number | string;
+            /** Format: double */
+            fixedFee: number | string;
+            fixedFeeApplication: components["schemas"]["FixedFeeApplication"];
+            /** Format: double */
+            minimumFee: null | number | string;
+            /** Format: double */
+            maximumFee: null | number | string;
+            notes: null | string;
+            closeCurrentOpenVersion: boolean;
+        };
+        FeeRuleVersionResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date */
+            validFrom: string;
+            /** Format: date */
+            validUntil: null | string;
+            /** Format: double */
+            commissionPercent: number | string;
+            /** Format: double */
+            fixedFee: number | string;
+            fixedFeeApplication: components["schemas"]["FixedFeeApplication"];
+            /** Format: double */
+            minimumFee: null | number | string;
+            /** Format: double */
+            maximumFee: null | number | string;
+            notes: null | string;
+        };
         FilamentDetailsRequest: {
             materialType: components["schemas"]["FilamentMaterialType"];
             brand: string;
@@ -1765,6 +2568,8 @@ export interface components {
         };
         /** @enum {unknown} */
         FilamentMaterialType: "Pla" | "PlaPlus" | "Petg" | "Abs" | "Asa" | "Tpu" | "Nylon" | "Pc" | "Pva" | "Other";
+        /** @enum {unknown} */
+        FixedFeeApplication: "PerUnit" | "PerOrder";
         /** Format: binary */
         IFormFile: string;
         InitialBalanceRequest: {
@@ -1896,6 +2701,215 @@ export interface components {
         MaterialCostSource: "WEIGHTED_AVERAGE_ACQUISITION" | "MANUAL_OVERRIDE";
         /** @enum {unknown} */
         PersonType: "Individual" | "Company";
+        /** @enum {unknown} */
+        PriceRoundingPolicy: "CENT" | "TEN_CENTS" | "WHOLE" | "NINETY_NINE" | "NONE" | null;
+        PricingCalculateRequest: {
+            /** Format: double */
+            unitTotalCost: number | string;
+            /** Format: double */
+            commissionPercent: number | string;
+            /** Format: double */
+            fixedFee: number | string;
+            /** Format: double */
+            desiredMargin: null | number | string;
+            roundingPolicy: null | components["schemas"]["PriceRoundingPolicy"];
+            /** Format: double */
+            minimumFee: null | number | string;
+            /** Format: double */
+            maximumFee: null | number | string;
+        };
+        PricingCalculateResponse: {
+            /** Format: double */
+            unitTotalCost: number | string;
+            /** Format: double */
+            commissionPercent: number | string;
+            /** Format: double */
+            fixedFee: number | string;
+            /** Format: double */
+            desiredMargin: number | string;
+            /** Format: double */
+            denominator: number | string;
+            /** Format: double */
+            rawPrice: number | string;
+            /** Format: double */
+            suggestedPrice: number | string;
+            /** Format: double */
+            commissionAmount: number | string;
+            feeClampApplied: null | string;
+            warnings: string[];
+        };
+        ProductCreateRequest: {
+            code: string;
+            name: string;
+            description: null | string;
+        };
+        ProductListItemResponse: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            active: boolean;
+            /** Format: int64 */
+            version: number | string;
+        };
+        ProductListResponse: {
+            items: components["schemas"]["ProductListItemResponse"][];
+            /** Format: int32 */
+            page: number | string;
+            /** Format: int32 */
+            pageSize: number | string;
+            /** Format: int32 */
+            total: number | string;
+        };
+        /** @enum {unknown} */
+        ProductListStatus: "active" | "inactive" | "all";
+        ProductPriceRequest: {
+            /** Format: uuid */
+            salesChannelId: string;
+            /** Format: double */
+            desiredMarginOverride: null | number | string;
+        };
+        ProductPriceResponse: {
+            /** Format: uuid */
+            productId: string;
+            productCode: string;
+            productName: string;
+            /** Format: double */
+            unitTotalCost: number | string;
+            /** Format: uuid */
+            salesChannelId: string;
+            salesChannelCode: string;
+            salesChannelKind: components["schemas"]["SalesChannelKind"];
+            salesChannelName: string;
+            /** Format: double */
+            desiredMargin: number | string;
+            /** Format: uuid */
+            feeRuleId: string;
+            /** Format: uuid */
+            feeRuleVersionId: string;
+            /** Format: double */
+            commissionPercent: number | string;
+            /** Format: double */
+            fixedFee: number | string;
+            /** Format: date */
+            organizationDate: string;
+            /** Format: double */
+            denominator: number | string;
+            /** Format: double */
+            rawPrice: number | string;
+            roundingPolicy: components["schemas"]["PriceRoundingPolicy"];
+            /** Format: double */
+            suggestedPrice: number | string;
+            /** Format: double */
+            commissionAmount: number | string;
+            feeClampApplied: null | string;
+            warnings: string[];
+        };
+        ProductRecipeAdditionalCostLineRequest: {
+            description: string;
+            /** Format: double */
+            amount: number | string;
+        };
+        ProductRecipeAdditionalCostLineResponse: {
+            /** Format: uuid */
+            id: string;
+            description: string;
+            /** Format: double */
+            amount: number | string;
+            /** Format: int32 */
+            sortOrder: number | string;
+        };
+        ProductRecipeMaterialLineRequest: {
+            /** Format: uuid */
+            supplyId: string;
+            /** Format: double */
+            quantity: number | string;
+            enteredUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: double */
+            wastagePercentOverride: null | number | string;
+            /** Format: double */
+            manualUnitCostOverride: null | number | string;
+        };
+        ProductRecipeMaterialLineResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            supplyId: string;
+            supplyCode: string;
+            supplyName: string;
+            supplyActive: boolean;
+            /** Format: double */
+            enteredQuantity: number | string;
+            enteredUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: double */
+            normalizedQuantityBaseUnit: number | string;
+            baseUnit: components["schemas"]["SupplyBaseUnit"];
+            /** Format: double */
+            wastagePercentOverride: null | number | string;
+            /** Format: double */
+            manualUnitCostOverride: null | number | string;
+            /** Format: int32 */
+            sortOrder: number | string;
+        };
+        ProductRecipeResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            productId: string;
+            /** Format: int32 */
+            revisionNumber: number | string;
+            /** Format: double */
+            wastagePercentOverride: null | number | string;
+            /** Format: double */
+            laborMinutes: null | number | string;
+            /** Format: double */
+            laborHourlyRateOverride: null | number | string;
+            /** Format: double */
+            machineMinutes: null | number | string;
+            /** Format: double */
+            machineHourlyRate: null | number | string;
+            /** Format: int32 */
+            outputQuantity: number | string;
+            notes: null | string;
+            materialLines: components["schemas"]["ProductRecipeMaterialLineResponse"][];
+            additionalCostLines: components["schemas"]["ProductRecipeAdditionalCostLineResponse"][];
+        };
+        ProductRecipeUpdateRequest: {
+            /** Format: double */
+            wastagePercentOverride: null | number | string;
+            /** Format: double */
+            laborMinutes: null | number | string;
+            /** Format: double */
+            laborHourlyRateOverride: null | number | string;
+            /** Format: double */
+            machineMinutes: null | number | string;
+            /** Format: double */
+            machineHourlyRate: null | number | string;
+            /** Format: int32 */
+            outputQuantity: number | string;
+            notes: null | string;
+            materialLines: components["schemas"]["ProductRecipeMaterialLineRequest"][];
+            additionalCostLines: components["schemas"]["ProductRecipeAdditionalCostLineRequest"][];
+            /** Format: int64 */
+            productVersion: number | string;
+        };
+        ProductResponse: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            description: null | string;
+            active: boolean;
+            /** Format: int64 */
+            version: number | string;
+            recipe: components["schemas"]["ProductRecipeResponse"];
+        };
+        ProductUpdateRequest: {
+            name: string;
+            description: null | string;
+            /** Format: int64 */
+            version: number | string;
+        };
         PurchaseReceiptRequest: {
             /** Format: double */
             quantity: number | string;
@@ -1914,6 +2928,38 @@ export interface components {
         };
         RequeueOutboxMessageRequest: {
             reason: string;
+        };
+        SalesChannelCreateRequest: {
+            code: string;
+            name: string;
+            kind: components["schemas"]["SalesChannelKind"];
+            /** Format: double */
+            defaultMarginPercent: null | number | string;
+            notes: null | string;
+        };
+        /** @enum {unknown} */
+        SalesChannelKind: "Direct" | "Marketplace" | "Other";
+        SalesChannelResponse: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
+            kind: components["schemas"]["SalesChannelKind"];
+            /** Format: double */
+            defaultMarginPercent: null | number | string;
+            notes: null | string;
+            active: boolean;
+            /** Format: int64 */
+            version: number | string;
+        };
+        SalesChannelUpdateRequest: {
+            name: string;
+            kind: components["schemas"]["SalesChannelKind"];
+            /** Format: double */
+            defaultMarginPercent: null | number | string;
+            notes: null | string;
+            /** Format: int64 */
+            version: number | string;
         };
         SettingUpdateRequest: {
             value: string;

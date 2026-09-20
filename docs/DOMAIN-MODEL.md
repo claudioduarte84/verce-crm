@@ -154,46 +154,72 @@ consumption. `Supply.LatestPurchaseUnitCost` remains informational and is not us
 
 ## 4. Catalog module
 
+> **S5 note ([ADR-0019](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md)).** The
+> shape below is what S5 actually built: a single **current-state** recipe per product, reusing
+> S4's Supply/`CostEngine` model rather than the pre-S4 Filament-component split. A forking,
+> multi-revision recipe history is deferred until a real consumer (a QuoteRevision snapshot in
+> S6, a ProductionOrder pointer in S9) defines what "current" must mean once a quote exists.
+
 ### Product (AR)
-`Id`, `Sku?` (unique when present), `Name`, `Description?`, `CategoryId?`, `ImagePath?`,
-`DefaultSalesChannelId?`, `DefaultMarginPercent: Percent?`, `IsActive`, `DeletedAt?`,
-`CurrentRecipeId?`.
+`Id` (UUID v7), `Code` (unique, normalized upper-case), `Name`, `Description?`, `Active`,
+`Version` (optimistic concurrency, ADR-0011 §2), one owned `ProductRecipe` (1:1).
 
-### ProductRecipe (*E*, versioned)
-`Id`, `ProductId`, `RevisionNumber` (1..N), `IsCurrent`, `EffectiveFrom`, `Notes?`, plus
-process parameters:
+### ProductRecipe (*E*, owned by `Product`)
+`Id`, `ProductId`, `RevisionNumber` (fixed at `1` in S5 — a forward-compatible placeholder, not a
+working revision chain), `OutputQuantity: int ≥ 1` (batch size the recipe describes), `Notes?`,
+plus process parameters passed straight into S4's `CostEngine` (never reimplemented):
 
-- `PrintDurationSeconds: DurationSeconds`
-- `MachineId?` (Energy module reference by ID)
-- `EstimatedEnergyKwh: Kwh?` — when set, overrides the machine-power estimate
-- `LaborMinutes: int`
-- `LaborHourlyRate: Money?` — null means "use the organization default"
-- `WastageRate: Percent` (default 0)
-- `PostProcessingNotes?`
+- `WastagePercentOverride: decimal?` — **percentage points**, not a fraction (ADR-0018's
+  exception, inherited here because this value flows directly into `CostCalculationInput`); null
+  means "use the scenario/global default the same way the Cost Laboratory does."
+- `LaborMinutes: decimal?`, `LaborHourlyRateOverride: decimal?` — null rate means "use
+  `costing.default_labor_hourly_rate`"; null minutes means "this recipe has no labor component."
+- `MachineMinutes: decimal?`, `MachineHourlyRate: decimal?` — machine cost requires an explicit
+  rate once minutes are set (`RECIPE_MACHINE_RATE_REQUIRED` otherwise); there is no default
+  machine rate setting, matching S4.
 
-Components (all *E*, all 0..N, **no maximum count**):
+Owned lines (both *E*, both 0..N, **no maximum count**, replaced wholesale on every recipe edit
+via `ReplaceMaterialLines`/`ReplaceAdditionalCostLines` rather than diffed):
 
-| Component | Fields |
+| Line | Fields |
 |---|---|
-| `ProductFilamentComponent` | `FilamentId`, `GramsUsed: Grams`, `AllowSubstitution: bool`, `Note?`, `SortOrder` |
-| `ProductSupplyComponent` | `SupplyId`, `Quantity`, `Note?`, `SortOrder` |
-| `ProductCostLine` | `Description`, `Amount: Money`, `CostKind {MANUAL, OUTSOURCED, OTHER}`, `SortOrder` |
+| `ProductRecipeMaterialLine` | `SupplyId` (no FK — Catalog never references Inventory, see ADR-0019 §2), `EnteredQuantity`, `EnteredUnit`, `NormalizedQuantityBaseUnit` (resolved by the API composition root via `SupplyUnitConversion`), `WastagePercentOverride?`, `ManualUnitCostOverride?`, `SortOrder` |
+| `ProductRecipeAdditionalCostLine` | `Description`, `Amount: decimal ≥ 0`, `SortOrder` |
 
-Packaging is **not** a separate concept: it is a `ProductSupplyComponent` pointing at a supply
-whose category kind is `PACKAGING`. The cost breakdown groups it separately by that flag, so
-the report dimension exists without a redundant model.
+There is no `ProductFilamentComponent`/`ProductSupplyComponent` split (S4 already unified
+"filament" into `Supply` + `SupplyCategory`, ADR-0017) and no separate `ProductCostLine.CostKind`
+— `ProductRecipeAdditionalCostLine` is the one generic additional-cost shape S4's `CostEngine`
+already accepts. Packaging remains a material line whose `Supply.CategoryCode = "PACKAGING"`,
+not a distinct concept.
 
 Invariants:
-- A recipe is **immutable once it has been used** by a quote snapshot or a production order.
-  Editing a used recipe creates `RevisionNumber + 1` and flips `IsCurrent`.
-- Exactly one `IsCurrent` recipe per product.
-- `GramsUsed > 0`, `Quantity > 0`, `Amount ≥ 0`.
-- A recipe may have zero components (a pure-labor or pure-manual-cost product is legal).
-- Referenced filaments/supplies must be active at the moment the recipe revision is created.
+- Exactly one `ProductRecipe` per `Product` (1:1, created empty at product construction).
+- `EnteredQuantity > 0`, its normalized base-unit quantity must clear the base-unit precision
+  floor, `Amount ≥ 0`, `WastagePercentOverride ∈ [0, 100]` when set.
+- A recipe may have zero material lines, zero labor and zero machine time — `ProductCostCalculator`
+  rejects only a recipe with **no cost component at all** (`RECIPE_EMPTY`).
+- **Duplicate `SupplyId` lines within one recipe are allowed and remain independent** — this
+  matches S4's `CostEngine`, which never deduplicates material lines.
+- Referenced Supplies are validated to exist at the moment a recipe is saved (`SUPPLY_NOT_FOUND`
+  otherwise). An inactive Supply may remain in an **existing** recipe line (reading, editing an
+  unrelated field, or recalculating cost never cares that a referenced Supply later went
+  inactive), but a write may never **increase** how many lines reference an inactive Supply —
+  per-Supply cardinality (`submittedCount ≤ existingCount`), not a per-line identity or set-only
+  check, because duplicate lines against one Supply are legal (`SUPPLY_INACTIVE` otherwise; see
+  [ADR-0019 §5.4/§5.6](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md#54-a-recipe-write-may-never-increase-how-many-lines-reference-an-inactive-supply)).
 
-Why versioned even though quotes snapshot everything: production orders and the shop-floor
-document need to point at *the exact recipe used*, and the operator needs to compare recipe
-revisions over time. Versioning is cheap; recovering it later is not.
+Editing a recipe never forks a new revision in S5 — it replaces the current one's parameters and
+lines in place, bumping the owning `Product.Version` by exactly one (ADR-0027, one Unit of Work).
+`RevisionNumber` exists in the schema precisely so that a future fork is an additive migration,
+not a breaking rename, once S6/S9 define what triggers one.
+
+### ProductCostCalculator (API-layer service, not a domain type)
+Translates a persisted `Product`/`ProductRecipe` into S4's `CostCalculationInput` — resolving
+each material line's cost source (manual override, else the Supply's weighted-average
+acquisition basis via `ICostingInventoryReader`), the effective wastage rate, and the effective
+labor/machine rates from Settings — then calls the **unmodified**
+`Verce.Modules.Costing.CostEngine.Calculate` and returns its `CostCalculationResult` unchanged.
+See [ADR-0019 §2](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md).
 
 ---
 
@@ -279,46 +305,66 @@ reset on reload. See ADR-0018.
 
 ## 7. Pricing module
 
+> **S5 note ([ADR-0019](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md)).** S5
+> ships a flat `FeeRule`/`FeeRuleVersion` — one rule per channel, no scope/priority, no
+> `PriceBracket`. CALCULATION-RULES §CR-07.5 already named bracket resolution "not used before
+> S8"; this section now matches what actually exists instead of the pre-S0 aspirational shape.
+
 ### SalesChannel (AR)
-`Id`, `Name`, `Kind {DIRECT, MARKETPLACE, OTHER}`, `Code?`, `IsActive`, `DeletedAt?`,
-`DefaultMarginPercent: Percent?`, `Notes?`.
+`Id` (UUID v7), `Code` (unique, normalized upper-case), `Name`, `Kind {Direct, Marketplace,
+Other}`, `DefaultMarginPercent: decimal?` (ADR-0002 **fraction**, e.g. `0.18` = 18% — Pricing
+does *not* inherit ADR-0018's percentage-point exception, which is scoped to
+`costing.default_wastage_rate` alone), `Notes?`, `Active`, `Version`.
 
-"Venda Direta" is a normal channel whose fee rule is 0% + R$ 0,00. **There is no special case
-in the engine** — direct sale is the degenerate marketplace. This is deliberate: one formula,
-one code path, one set of tests ([ADR-0005](architecture/ADR-0005-marketplace-fee-rules.md)).
+"Venda Direta" (`Code = "DIRECT"`, `Kind = Direct`) is seeded at first boot as a normal channel
+whose `FeeRuleVersion` is 0% commission + R$ 0,00 fixed fee, valid from `2020-01-01` with no end
+date. **DIRECT identity is a reserved, bidirectional one-to-one pair**: `Code == "DIRECT" ⇔
+Kind == Direct` — no other channel may ever be `Kind = Direct`, and the canonical row may never
+change away from it (`SalesChannel.UpdateDetails`, [ADR-0019 §5.5/§5.7](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md#57-direct-identity-is-a-reserved-bidirectional-codekind-pair)).
+**There is no special case in the engine** — direct sale is the degenerate marketplace.
+This is deliberate: one formula, one code path, one set of tests
+([ADR-0005](architecture/ADR-0005-marketplace-fee-rules.md)).
 
-### FeeRule (AR) + FeeRuleVersion (*E*) + PriceBracket (*E*)
+### FeeRule (AR) + FeeRuleVersion (*E*)
 
-`FeeRule`: `Id`, `SalesChannelId`, `Name`, `AppliesTo {ALL_PRODUCTS, PRODUCT_CATEGORY, PRODUCT}`,
-`TargetId?`, `Priority: int`, `IsActive`.
+`FeeRule`: `Id`, `SalesChannelId` (unique — **exactly one `FeeRule` per channel** in S5), `Name`,
+`Active`, `Version`. No `AppliesTo`, `TargetId` or `Priority` — those are S8+ (ADR-0019 §3).
 
-`FeeRuleVersion`: `Id`, `FeeRuleId`, `ValidFrom: DateOnly`, `ValidUntil: DateOnly?`,
-`CommissionPercent: Percent`, `FixedFee: Money`,
-`FixedFeeApplication {PER_UNIT, PER_ORDER}` (default `PER_UNIT`, see
-[CR-07.3](CALCULATION-RULES.md#cr-073--fixed-fee-application)),
-`MinimumFee: Money?`, `MaximumFee: Money?`, `ShippingComponent: Money?` (reserved, S8+), `Notes?`.
-
-`PriceBracket`: `Id`, `FeeRuleVersionId`, `MinPrice: Money`, `MaxPrice: Money?`,
-`CommissionPercent`, `FixedFee`, `MinimumFee?`, `MaximumFee?`, `SortOrder`.
-Zero brackets = the version's own flat values apply at every price.
+`FeeRuleVersion`: `Id`, `FeeRuleId`, `ValidFrom: DateOnly`, `ValidUntil: DateOnly?` (half-open
+`[from, until)`), `CommissionPercent: decimal ∈ [0, 1)` (ADR-0002 fraction),
+`FixedFee: decimal ≥ 0`, `FixedFeeApplication {PerUnit, PerOrder}` (see
+[CR-07.3](CALCULATION-RULES.md#cr-073--fixed-fee-application)), `MinimumFee: decimal?`,
+`MaximumFee: decimal?`, `Notes?`. No `PriceBracket` and no `ShippingComponent` in S5.
 
 Invariants:
-- Versions of the same rule must not overlap in time (database exclusion constraint).
-- Brackets within a version must not overlap and must be contiguous from the lowest `MinPrice`.
-- `CommissionPercent ∈ [0, 1)`.
-- `MinimumFee ≤ MaximumFee` when both present.
+- Versions of the same rule must not overlap in time — enforced by a PostgreSQL `EXCLUDE USING
+  gist` constraint over `(fee_rule_id, daterange(valid_from, valid_until, '[)'))`, requiring the
+  `btree_gist` extension (raw SQL in the migration; deliberately unmodeled in
+  `FeeRuleVersionConfiguration` so `has-pending-model-changes` never flags it as drift).
+- `CommissionPercent ∈ [0, 1)`, `FixedFee ≥ 0`, `MinimumFee ≤ MaximumFee` when both present.
+- An inverted window (`ValidUntil ≤ ValidFrom`) is rejected at construction
+  (`FEE_RULE_VERSION_INVALID_WINDOW`).
 
-Resolution: given `(salesChannelId, productId, instant, price)` the `FeeRuleResolver` picks the
-highest-`Priority` active rule matching the product scope, then its version valid at `instant`,
-then its bracket for `price`. The bracket/price circularity is resolved by the algorithm in
-[CALCULATION-RULES §7.3](CALCULATION-RULES.md#cr-075--bracket-resolution-fee-depends-on-price-price-depends-on-fee).
+Resolution: given `(salesChannelId, instant)`, `FeeRule.ResolveVersionAt(instant)` picks the
+single version whose `[ValidFrom, ValidUntil)` covers `instant` — no product scope, no priority,
+no bracket. Missing resolution fails with `FEE_RULE_NOT_FOUND`, never a silent zero-fee default.
+Per-product/per-category scoping and price-bracket resolution
+([CR-07.5](CALCULATION-RULES.md#cr-075--bracket-resolution-fee-depends-on-price-price-depends-on-fee))
+remain S8 scope.
 
 ### PricingEngine (domain service, pure)
-Input: `unitTotalCost`, `commissionPercent`, `fixedFee`, `desiredMargin`, `roundingPolicy`,
-optional `finalPriceOverride`. Output: `PriceBreakdown` with cost, fixed fee, commission
-amount, desired margin, suggested price, final price, expected profit, effective margin, and
-the ordered list of steps that produced it. Rejects invalid denominators — never returns a
-number computed from a non-positive denominator.
+Input (`PricingCalculationInput`): `unitTotalCost`, `commissionPercent`, `fixedFee`,
+`desiredMargin`, `roundingPolicy {CENT, TEN_CENTS, WHOLE, NINETY_NINE, NONE}`,
+`marginWarningDenominator`, optional `minimumFee`/`maximumFee`. Output
+(`PricingCalculationResult`): `denominator`, `rawPrice`, `suggestedPrice`, `commissionAmount`
+(clamped by min/max fee, reporting which clamp fired), and `warnings` (e.g.
+`PRICING_EXTREME_MARGIN` when the denominator falls below the warning threshold but is still
+valid). Rejects an invalid commission, margin or non-positive denominator before computing
+anything — never returns a number derived from one. The rounding policy is applied directly to
+`rawPrice`, not to a pre-rounded value (ADR-0019 §4). `Product`-aware pricing
+(`POST /api/pricing/products/{id}/price`) resolves `unitTotalCost` from
+`ProductCostCalculator`'s `EstimatedUnitCost` and the commission/fixed fee/min/max from
+`FeeRule.ResolveVersionAt(today)` before calling this same pure engine.
 
 ---
 

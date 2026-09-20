@@ -91,6 +91,21 @@ public sealed class AppSettingValueReader(VerceDbContext db)
         return parsed;
     }
 
+    /// <summary>Reads a String/Choice setting's current validated value (e.g.
+    /// <c>pricing.price_rounding_policy</c>) — the same tracked-then-persisted-then-default
+    /// fallback as <see cref="GetDecimalAsync"/>, without a numeric parse.</summary>
+    public async Task<string> GetStringAsync(string key, CancellationToken cancellationToken)
+    {
+        var definition = SettingCatalog.GetRequired(key);
+        if (definition.ValueType != AppSettingValueType.String) throw new ArgumentException("SETTING_TYPE_INVALID");
+        var tracked = db.Set<AppSetting>().Local.SingleOrDefault(item => item.Key == definition.Key);
+        var value = tracked?.Value ?? await db.Set<AppSetting>().AsNoTracking()
+            .Where(item => item.Key == definition.Key)
+            .Select(item => item.Value)
+            .SingleOrDefaultAsync(cancellationToken) ?? definition.DefaultValue;
+        return SettingCatalog.Validate(definition.Key, value, definition.ValueType);
+    }
+
     public async Task<long> GetMaximumImageBytesAsync(CancellationToken cancellationToken)
     {
         var definition = SettingCatalog.GetRequired("uploads.max_image_bytes");

@@ -48,6 +48,7 @@ its own work; a different model reviews this delivery.
 | [0016](ADR-0016-document-render-snapshots.md) | Document Render Snapshots and Immutability | Accepted | Layout, branding and content frozen at issue; issued documents never regenerated |
 | [0017](ADR-0017-inventory-ledger-and-unit-normalization.md) | Inventory Ledger, Non-Negative Stock Concurrency, and Unit Normalization | Accepted (pending external review) | Append-only signed-delta ledger; non-negative stock via the aggregate's own `Version` (H-007 A); closed unit conversion table; Filament is optional `Supply` metadata, not a separate aggregate |
 | [0018](ADR-0018-s4-stateless-cost-laboratory-and-acquisition-basis.md) | S4 Stateless Cost Laboratory and Acquisition Basis | Accepted (pending external review) | Pure stateless engine; weighted average of cost-bearing purchase receipts; explicit simulation overrides; targeted wastage Setting compatibility migration |
+| [0019](ADR-0019-s5-product-recipe-and-pricing-engine.md) | S5 Product Recipe Persistence and Pricing Engine Scope | Accepted (pending external review) · **revised 2026-09-19** | Current-state (non-versioned) Product Recipe reusing S4's CostEngine unmodified; flat FeeRule (no brackets/scoping before S8); rounding policy applied to the raw price; NINETY_NINE ceiling fix, organization-date fee resolution, self-describing Product Pricing snapshot contract and the DIRECT zero-fee invariant (Terra S5 independent review) |
 
 ## Template
 

@@ -7,11 +7,13 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Verce.Api.Auth;
 using Verce.Api.Authorization;
+using Verce.Api.Catalog;
 using Verce.Api.Cli;
 using Verce.Api.Customers;
 using Verce.Api.Costing;
 using Verce.Api.Inventory;
 using Verce.Api.Outbox;
+using Verce.Api.Pricing;
 using Verce.Api.Settings;
 using Verce.Platform.Identity;
 using Verce.Platform.Persistence;
@@ -56,6 +58,7 @@ builder.Services.AddScoped<Verce.Modules.Settings.BrandAssetStorage>();
 builder.Services.AddScoped<Verce.Modules.Costing.ICostingInventoryReader, Verce.Api.Costing.InventoryCostSourceReader>();
 builder.Services.AddHostedService<Verce.Modules.Settings.SettingsSeedService>();
 builder.Services.AddHostedService<Verce.Modules.Inventory.InventorySeedService>();
+builder.Services.AddHostedService<Verce.Modules.Pricing.PricingSeedService>();
 
 // ---- Authentication: same-origin cookie, no bearer/JWT (ADR-0009 §1, SECURITY §2) ----
 // The cookie scheme(s) must be explicitly ADDED, not merely configured — ConfigureApplicationCookie
@@ -171,6 +174,8 @@ app.MapCustomerEndpoints();
 app.MapSettingsEndpoints();
 app.MapSupplyEndpoints();
 app.MapCostingEndpoints();
+app.MapProductEndpoints();
+app.MapPricingEndpoints();
 
 // ---- Health endpoints (ADR-0012 §25, OPERATIONS §9): status word only, anonymous ----
 app.MapGet("/health/live", () => Results.Text("healthy")).AllowAnonymous();

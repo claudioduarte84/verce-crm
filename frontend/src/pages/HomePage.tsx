@@ -37,6 +37,8 @@ export function HomePage() {
             <Link to="/customers">Clientes</Link>
             <Link to="/supplies">Suprimentos e estoque</Link>
             <Link to="/cost-laboratory">Laboratório de Custos</Link>
+            <Link to="/products">Produtos e receitas</Link>
+            <Link to="/pricing">Precificação e canais de venda</Link>
             <Link to="/settings">Configurações e marca</Link>
           </nav>
         </section>

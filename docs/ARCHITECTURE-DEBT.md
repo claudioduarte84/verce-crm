@@ -54,8 +54,8 @@ row unresolved has not met its Definition of Done, and the reviewer should rejec
 | **H-001** | Quoting / Production | Revision ↔ production lifecycle: behaviour when a superseded revision has an order in each state; whether `has_pending_revision` blocks queue actions; what happens to actual consumption already recorded against a canceled order | **Before S6** | S9 | Open |
 | **H-002** | Sales | Sale lifecycle: when a sale may be created from a revision, whether cancellation reverses stock, interaction with a delivered production order, whether partial/multiple sales per revision are permitted | S8 | S8 | Open |
 | **H-003** | Sales / Pricing | Mixed channel and fulfilment: an item-level channel override changes fees per line — how a single sale spanning two channels reports revenue, fees and margin, and whether it is permitted at all | S8 | S8 | Open |
-| **H-004** | Pricing | `PER_ORDER` fixed-fee allocation: rounding of `fixedFee / quantity` across lines, residual-cent assignment, behaviour when quantity changes on a revision | S5 | S5 | Open |
-| **H-005** | Pricing | Interaction of manual price override, item discount and bracket resolution: precedence, whether an override re-resolves the bracket, how effective margin is reported when all three apply | S5 | S5 | Open |
+| **H-004** | Pricing | `PER_ORDER` fixed-fee allocation: rounding of `fixedFee / quantity` across lines, residual-cent assignment, behaviour when quantity changes on a revision | S5 (single-item case) / **S6** (cross-line case) | S5 (single-item case) / **S6** (cross-line case) | **Partially resolved (S5)** — see note below |
+| **H-005** | Pricing | Interaction of manual price override, item discount and bracket resolution: precedence, whether an override re-resolves the bracket, how effective margin is reported when all three apply | **S8** | **S8** | **Deadline corrected (S5)** — see note below |
 | **H-006** | Costing / Production | Actual total cost composition: manual lines with no actual counterpart, partial reconciliation, failed units, exact exclusion of wastage from the actual side | **Before S10** | S11 | Open |
 | **H-007 A** | Inventory | Stock movement sign convention and `StockCount` concurrency (two counts of one material racing) | S3 | S3 | **Closed (S3)** — see [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) §1, §3 |
 | **H-007 B** | Inventory / Production | Actual-consumption idempotency: preventing a production item's consumption being recorded twice | S11 | S11 | Open |
@@ -64,6 +64,47 @@ row unresolved has not met its Definition of Done, and the reviewer should rejec
 | **H-009 A** | Quoting | **Commercial** conversion semantics: quotes reopened after a terminal state, quotes whose current revision returns to `GENERATED` | **Before S6** | S6 | Open |
 | **H-009 B** | Reporting | Conversion reporting: cohort labelling of incomplete periods, `null` handling | S12 | S12 | Open |
 | **H-010** | Energy / Costing | Energy tariff availability before the Energy module exists: S4–S9 must price energy from the seeded default tariff without hard-coding a value, and S10 must not retroactively change quotes priced earlier | **Before S4** | S4 | Open |
+
+### Resolution note for H-004 and H-005 (S5)
+
+S5 built `Verce.Modules.Pricing.PricingEngine`, `FeeRule`/`FeeRuleVersion` and the full P1–P10
+golden corpus (see [ADR-0019](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md)).
+That is the single-item, single-fee-version case both rows partly describe, and it is fully
+decided and tested: CR-07.3's `PER_UNIT`/`PER_ORDER` split (unchanged since S0) is persisted on
+`FeeRuleVersion.FixedFeeApplication`, and `PricingEngine` applies `PER_UNIT` correctly for every
+golden case.
+
+What S5 could **not** decide, and why the original S5 deadline was wrong for the rest of each row:
+
+- **H-004's "across lines" / "quantity changes on a revision" scope** is a `QuoteItem`
+  allocation problem — S5 has no `Quote`, `QuoteRevision` or `QuoteItem` (explicitly out of
+  scope for this sprint). There is no "line" or "revision quantity" for `PER_ORDER` to allocate
+  across yet. This remainder is retargeted to **S6**, the sprint that actually builds `QuoteItem`.
+- **H-005** names three concepts — manual price override, item discount, bracket resolution —
+  and S5 confirmed (ADR-0019 §3) that `PriceBracket` is deferred to **S8**, matching what
+  CR-07.5 already said. Item discount is `QuoteItem` scope (S6). Deciding "how all three
+  interact" before any of the three exists is not a decision S5 can make in good faith; it is
+  retargeted to **S8**, when bracket resolution — the last of the three to be built — actually
+  exists to interact with.
+
+This is a deadline **correction**, not a deferral of convenience: the original S5 deadline for
+both rows predates ADR-0019's own decision (made in this same delivery) that brackets are S8
+scope, so S5 could not have met it without inventing bracket/discount semantics that S8 would
+then have to redo. Flagged explicitly here, and in the S5 delivery report's Open Decisions
+section, rather than silently left `Open` against a deadline this same delivery proved
+unmeetable.
+
+### Flag for orchestrator review: H-001 and H-009 A during S5
+
+Per rule 1(b), a `Before S6` decision deadline is nominally an S5 exit requirement. Both H-001
+(Quoting/Production revision lifecycle) and H-009 A (Quoting commercial conversion semantics) are
+entirely about aggregates S5 does not touch (`Quote`, `QuoteRevision`, `ProductionOrder`) and
+that this sprint's mission brief explicitly excluded. S5 has no mandate to design Quoting or
+Production state-machine semantics from inside the Catalog/Pricing modules, and doing so here
+would be exactly the kind of premature, unreviewed architectural decision CLAUDE.md §5 warns
+against. Both rows are left **Open, unchanged**, and are called out again in the S5 report's
+Open Decisions section for the orchestrator to route to whichever sprint is positioned to decide
+them — most plausibly S6 itself, immediately before it needs the answer.
 
 **Why some decisions precede their implementation.** H-001 and H-009 A are due *before S6*
 because S6 builds the quote engine: if revision-vs-production behaviour or the commercial meaning

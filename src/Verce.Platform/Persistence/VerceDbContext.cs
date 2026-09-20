@@ -61,6 +61,9 @@ public class VerceDbContext : IdentityDbContext<ApplicationUser, ApplicationRole
     {
         base.OnModelCreating(builder);
         builder.HasPostgresExtension("pg_trgm");
+        // S5: FeeRuleVersion's non-overlap EXCLUDE constraint (ADR-0005 §1) needs gist support
+        // over a plain equality column (fee_rule_id) alongside the range operator.
+        builder.HasPostgresExtension("btree_gist");
 
         // ---- customers.customer_creation_sequence_seq — ADR-0011 §1.2.1: the internal,
         // database-allocated final tie-breaker for Customer list ordering. Declared once here
@@ -73,6 +76,12 @@ public class VerceDbContext : IdentityDbContext<ApplicationUser, ApplicationRole
         // ---- inventory.supply_creation_sequence_seq — same rationale, for the Supply list's
         // Name-search ordering (S3). ----
         builder.HasSequence<long>("supply_creation_sequence_seq", "inventory")
+            .StartsAt(1)
+            .IncrementsBy(1);
+
+        // ---- catalog.product_creation_sequence_seq — same rationale, for the Product list's
+        // Name-search ordering (S5). ----
+        builder.HasSequence<long>("product_creation_sequence_seq", "catalog")
             .StartsAt(1)
             .IncrementsBy(1);
 

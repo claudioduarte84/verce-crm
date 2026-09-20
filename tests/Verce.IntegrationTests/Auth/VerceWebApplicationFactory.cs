@@ -4,7 +4,9 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Verce.SharedKernel.Time;
 
 namespace Verce.IntegrationTests.Auth;
 
@@ -47,6 +49,7 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
     private readonly string _connectionString;
     private readonly IReadOnlyDictionary<string, string?> _extraConfiguration;
     private readonly Dictionary<string, string?> _settings;
+    private readonly IClock? _clockOverride;
     private bool _environmentLockHeld;
 
     /// <param name="connectionString">The real PostgreSQL connection string.</param>
@@ -55,10 +58,16 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
     /// Every OTHER test in this project manipulates outbox rows directly and must never race a
     /// live scheduler, so the default (no override) is scheduling DISABLED here — production's
     /// own composition root leaves it enabled; only this test factory opts out by default.</param>
-    public VerceWebApplicationFactory(string connectionString, IReadOnlyDictionary<string, string?>? extraConfiguration = null)
+    /// <param name="clockOverride">Terra B-02: when supplied, replaces the real <see cref="SystemClock"/>
+    /// with this exact <see cref="IClock"/> for the whole host — used to prove FeeRuleVersion
+    /// resolution uses <see cref="IClock.OrganizationToday"/> (America/Sao_Paulo), not
+    /// <c>UtcNow.Date</c>, at a real UTC/BRT calendar boundary. Null (the default) leaves
+    /// production's real wall clock untouched for every other test.</param>
+    public VerceWebApplicationFactory(string connectionString, IReadOnlyDictionary<string, string?>? extraConfiguration = null, IClock? clockOverride = null)
     {
         _connectionString = connectionString;
         _extraConfiguration = extraConfiguration ?? new Dictionary<string, string?>();
+        _clockOverride = clockOverride;
 
         _settings = new Dictionary<string, string?>
         {
@@ -136,7 +145,10 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
         // framework's default 30-minute cadence, so the test can observe session invalidation
         // deterministically without waiting in real time.
         builder.ConfigureServices(services =>
-            services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.Zero));
+        {
+            services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.Zero);
+            if (_clockOverride is not null) services.Replace(ServiceDescriptor.Singleton(_clockOverride));
+        });
     }
 
     private static void RemoveEventLogProvider(IServiceCollection services)

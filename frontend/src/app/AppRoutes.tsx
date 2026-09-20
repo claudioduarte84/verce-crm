@@ -8,6 +8,8 @@ import { CustomersPage } from '../pages/CustomersPage'
 import { SettingsPage } from '../pages/SettingsPage'
 import { SuppliesPage } from '../pages/SuppliesPage'
 import { CostLaboratoryPage } from '../pages/CostLaboratoryPage'
+import { ProductsPage } from '../pages/ProductsPage'
+import { PricingPage } from '../pages/PricingPage'
 
 /** Routing foundation (mission §14). Only the routes S1 needs: login, setup-account, an
  * authenticated home placeholder, and not-found. Customers/Catalog/Quoting/... are S2+. */
@@ -27,6 +29,8 @@ export function AppRoutes() {
       <Route path="/customers" element={<RequireAuth><CustomersPage /></RequireAuth>} />
       <Route path="/supplies" element={<RequireAuth><SuppliesPage /></RequireAuth>} />
       <Route path="/cost-laboratory" element={<RequireAuth><CostLaboratoryPage /></RequireAuth>} />
+      <Route path="/products" element={<RequireAuth><ProductsPage /></RequireAuth>} />
+      <Route path="/pricing" element={<RequireAuth><PricingPage /></RequireAuth>} />
       <Route path="/settings" element={<RequireAuth><SettingsPage /></RequireAuth>} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

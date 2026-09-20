@@ -263,8 +263,15 @@ typo, so the UI must surface it.
 ### CR-07.2 — Suggested price
 ```
 rawPrice       = (unitTotalCost + fixedFeePerUnit) / denominator
-suggestedPrice = applyRoundingPolicy( round2( rawPrice ) )
+suggestedPrice = applyRoundingPolicy( rawPrice )
 ```
+
+> **S5 clarification ([ADR-0019 §4](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md)).**
+> The rounding policy is applied to the raw, unrounded `rawPrice` — not to a value already
+> rounded to two decimals — matching CR-07.4's own worked table (`NONE` on `40,5187234…` yields
+> `40,51`, the truncated raw value, never `40,52`). `Verce.Modules.Pricing.PricingEngine` is the
+> implementation of record; if this prose and the worked table in CR-07.4 ever disagree again,
+> the worked table wins.
 
 **Direct sale** (commission = 0, fixedFee = 0) collapses to the brief's formula:
 ```
@@ -307,6 +314,15 @@ suggestedPrice  = R$ 40,52
 
 All policies except `NONE` and `CENT` round **up**, never down: rounding a price down silently
 erodes the margin the operator asked for.
+
+> **NINETY_NINE precisely (Terra B-01 correction, [ADR-0019 §5.1](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md#51-ninety_nine-is-a-true-ceiling-not-floor099)).**
+> `NINETY_NINE` means **the smallest commercial price of the form `N,99` that is greater than or
+> equal to the raw price** — a true ceiling. It does **not** mean "replace the decimal digits with
+> `,99`": for a raw price of `40,995`, replacing the digits gives `40,99`, which is BELOW the raw
+> price and therefore wrong; the correct result is `41,99`. Worked boundary values:
+> `40,98 → 40,99`, `40,99 → 40,99` (exact `,99` stays put), `40,991 → 41,99`,
+> `40,995 → 41,99`, `41,00 → 41,99`, `41,99 → 41,99`, `41,991 → 42,99`. For every valid raw price,
+> `suggestedPrice ≥ rawPrice` holds under this policy, same as every other rounding-up policy.
 
 ### CR-07.5 — Bracket resolution (fee depends on price, price depends on fee)
 
