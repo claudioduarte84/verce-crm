@@ -298,9 +298,18 @@ suggestedPrice  = R$ 40,52
 `FeeRuleVersion.FixedFeeApplication ∈ {PER_UNIT, PER_ORDER}`, default `PER_UNIT`.
 
 - `PER_UNIT` → `fixedFeePerUnit = fixedFee`.
-- `PER_ORDER` → `fixedFeePerUnit = round6(fixedFee / quantity)`, and the item snapshot records
+- `PER_ORDER` → `fixedFeePerUnit = round6(allocatedOrderFee / quantity)`, where
+  `allocatedOrderFee` is **this line's share** of the one order-level fee, allocated across the
+  lines by [CR-07.7](#cr-077--per_order-fee-allocation-across-lines). The item snapshot records
   both the raw fee and the allocation, so a quantity change is visibly a different allocation
   rather than a mysterious price move.
+
+> **Corrected for the multi-line case (H-004 remainder,
+> [ADR-0020 §C](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md)).** This
+> rule previously divided the **whole** fee by each line's own quantity. That is correct for a
+> single-line quote — all S5 could produce — but charges the order fee once per *line* as soon as
+> there are two, which contradicts `PER_ORDER`'s own definition ("charged once per order").
+> A single-line quote is unaffected: its allocated share **is** the whole fee.
 
 ### CR-07.4 — Price rounding policy (setting `pricing.price_rounding_policy`)
 
@@ -359,6 +368,88 @@ Clamping is applied **after** the price is computed. When a clamp is active, the
 margin (CR-08.4) will differ from the desired margin; that difference must be surfaced in the
 breakdown as `feeClampApplied: MIN|MAX`, never hidden.
 
+### CR-07.7 — `PER_ORDER` fee allocation across lines
+
+*(H-004 remainder; decided in [ADR-0020 §C](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md).
+Not exercised before S6, which is the first sprint with quote lines.)*
+
+A `PER_ORDER` fixed fee is charged **exactly once per quote revision** — never once per line,
+never once per unit. It is *our* marketplace cost, recovered through the quoted prices exactly as
+commission already is; it is never a separate customer-facing charge, so revision totals
+(CR-08.6) remain pure sums of line values.
+
+**Scope.** Allocation runs over the lines of the revision resolving to the same applicable
+`FeeRuleVersion` (the "fee group"). In S6 that is all lines, since mixed-channel revisions are
+H-003's decision (S8). A `FeeRuleVersion` carries exactly one fixed fee, so there is exactly one
+order-level fee per group.
+
+**Basis — the line's estimated cost**, known before pricing and therefore non-circular:
+
+```
+basis_i      = round6( unitTotalCost_i × quantity_i )
+totalBasis   = Σ basis_i                                   (over the fee group)
+exactShare_i = orderFee × basis_i / totalBasis             (full decimal precision, unrounded)
+```
+
+Cost proportion raises every line's **allocation-driven pricing basis** by the *same percentage*
+(`basis_i · (1 + orderFee/totalBasis)`), so no line's cost signal is distorted relative to
+another's — this is exact regardless of margin, rounding or overrides, because it happens before
+any of those apply. It is **not** a claim that every line's *final* price moves by that same
+percentage: `price_i = (basis_i · (1 + orderFee/totalBasis)) / (1 − commission − margin_i)` only
+collapses to one shared multiplier when `margin_i` is also uniform across the group — and
+`DesiredMarginPercent` is set per line, so it need not be. See
+[ADR-0020 §C.3](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md#c3-allocation-basis-line-estimated-cost)
+for the exact statement. Quantity or equal-per-line bases would inflate cheap lines; a price-based
+basis would be circular (the fee would depend on the price that depends on the fee).
+
+**Algorithm — floor plus largest remainder**, because allocation *partitions* an exact amount and
+the parts must sum to the whole:
+
+```
+1. alloc_i   = floor2( exactShare_i )                      (truncate toward zero, 2 decimals)
+2. residual  = round( (orderFee − Σ alloc_i) × 100 )       (integer, 0 ≤ residual < lineCount)
+3. rank by remainder_i = exactShare_i − alloc_i DESCENDING,
+   tie-break quote_item.line_number ASCENDING
+4. add R$ 0,01 to each of the first `residual` lines in that ranking
+```
+
+`line_number` is unique per revision and stable; **database row order is never used**, and
+`sort_order` (which the operator can change) is never used.
+
+**Invariant CR-07.7a (must be a test): `Σ alloc_i = orderFee` exactly, always.**
+
+| Degenerate input | Behaviour |
+|---|---|
+| `orderFee = 0` | every `alloc_i = 0`; `residual = 0` |
+| `orderFee < 0` | cannot occur — `FeeRuleVersion` validates `fixedFee ≥ 0` (ADR-0005) |
+| `totalBasis = 0` (every line zero-cost) | **equal split per line** — the same algorithm with `basis_i = 1`; no division by zero, no rejection |
+| one line with `basis_i = 0`, `totalBasis > 0` | that line gets `alloc_i = 0`; nothing special |
+| empty fee group | nothing to allocate; an empty quote is already refused (`QUOTE_HAS_NO_ITEMS`) |
+
+**Recalculation is total, and it happens while constructing the next revision — never on a
+persisted one.** There is no mutable "draft revision" in this domain
+([ADR-0020 §A.7](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md#a7-revision-construction-is-clone-then-recalculate-never-an-in-place-edit-blocking-02)):
+a commercial change (quantity, line added, line removed, cost changed) is applied to an in-memory
+revision candidate cloned from the current persisted revision, which recomputes the whole fee
+group's allocation from the candidate's current line set **before** that candidate is persisted as
+the next revision. Every line sharing the fee group is affected by construction — not only the
+line the operator touched — because the group's `totalBasis` changed
+([ADR-0020 §C.6](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md#c6-per_order-dependency-closure-and-full-recomputation)
+names this the dependency closure). Allocations are never patched incrementally, which would
+accumulate residual-cent drift and break CR-07.7a. Once a revision is persisted and reaches a
+terminal status it is immutable, so its allocations are frozen history; a further commercial
+change constructs yet another new revision, which recomputes its own allocation from scratch.
+
+**Rounding.** Partitioning is not rounding: no value here is rounded to a scale, each part is
+*selected* so the parts total the original. This is therefore not an exception to
+[ADR-0002 §4](architecture/ADR-0002-money-precision-and-rounding.md)'s half-away-from-zero rule,
+which continues to govern every ordinary rounding in the pricing of an allocated line.
+
+Worked vectors (S6's canonical corpus) are in
+[ADR-0020 §C.8](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md#c8-canonical-allocation-vectors):
+single line · two equal lines · three equal lines (residual cent) · unequal basis · quantity
+change · line removal · zero basis.
+
 ---
 
 ## 8. Discount, line totals and profit
@@ -388,8 +479,15 @@ an allocation across items, not as a subtraction from the total.
 lineTotalAmount = round2( netUnitPrice * quantity )
 lineCostAmount  = round2( unitTotalCost * quantity )
 lineFeeAmount   = round2( commissionAmount * quantity )
-                + ( fixedFeeApplication = PER_UNIT ? round2(fixedFee * quantity) : round2(fixedFee) )
+                + ( fixedFeeApplication = PER_UNIT ? round2(fixedFee * quantity)
+                                                   : allocatedOrderFee )        -- CR-07.7
 ```
+
+The `PER_ORDER` branch uses **this line's allocated share**, not the whole fee. Adding
+`round2(fixedFee)` to every line — as this rule previously did — charges the order fee once per
+line, so a three-line quote with a R$ 10,00 order fee would report R$ 30,00 of fee. Because
+CR-07.7 guarantees `Σ allocatedOrderFee = orderFee` exactly, `Σ lineFeeAmount` now contains the
+order fee exactly once ([ADR-0020 §C.1](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md)).
 
 ### CR-08.4 — Profit and effective margin
 ```
@@ -521,21 +619,41 @@ editing this one.
 
 ### CR-12.1 — Conversion rate (formal definition)
 
-A quote that is still open is **not** a failure. Conversion is measured over **decided** quotes.
+*(Corrected for H-009 A — [ADR-0020 §B.2](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md),
+same-period cardinality frozen 2026-09-20. This rule previously said "the outcome of a quote is the
+outcome of its **last non-superseded revision**", which is precisely the retroactive,
+current-revision-keyed definition H-009 A was raised against: it silently removed a won quote from
+a closed period the moment anyone revised it. The normative definition now lives in
+[DATA-DICTIONARY §4.1](DATA-DICTIONARY.md#41-conversion-rate-taxa-de-conversão); this rule restates
+it so the two can never drift.)*
+
+A quote that is still open is **not** a failure. Conversion is measured over **decided** quotes,
+where a decision is read from the append-only status history, not from the current revision.
 
 ```
-decided(period)  = quotes whose terminal outcome was reached in the period,
-                   outcome ∈ { APPROVED, CANCELED, EXPIRED }
-approved(period) = decided quotes whose outcome was APPROVED
+periodOutcome(quote, period) =                  -- at most ONE outcome per quote per period
+    WON    if firstApprovalAt(quote) falls in the period
+    LOST   else if ≥ 1 eligible pre-win CANCELED/EXPIRED transition falls in the period
+    —      otherwise
+                                                -- precedence: WON > LOST > no contribution
+
+won(period)      = COUNT(DISTINCT QuoteId) with periodOutcome = WON
+lost(period)     = COUNT(DISTINCT QuoteId) with periodOutcome = LOST
+decided(period)  = won(period) + lost(period)
 
 conversionRate(period) = decided(period) > 0
-                       ? round6( approved(period) / decided(period) )
+                       ? round6( won(period) / decided(period) )
                        : null
 ```
 
 Counting rules:
-- The unit is the **Quote**, not the revision. A quote with five revisions counts once.
-- The outcome of a quote is the outcome of its **last non-superseded revision**.
+- The unit is one **quote-period decision**. A quote with five revisions still contributes at most
+  one outcome to a period, and enters `won()` at most once **ever** (keyed on `firstApprovalAt`).
+- A quote's outcome is **never** read from its current revision's status. A win is dated at the
+  first `APPROVED` transition and is permanent; a loss is an eligible terminal transition that
+  occurred while the quote had never been approved.
+- Expire-then-cancel inside one period is **one** loss, not two; expire-then-approve inside one
+  period is **one** win and **zero** losses.
 - `SUPERSEDED` is never an outcome — it is an internal transition.
 - Quotes still in `GENERATED`, `SENT` or `NEGOTIATING` are excluded from both numerator and
   denominator; they appear separately as "em aberto".

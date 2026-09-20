@@ -374,7 +374,22 @@ anything — never returns a number derived from one. The rounding policy is app
 `Id`, `Number: QuoteNumber` (date + sequence, **without** revision suffix),
 `CustomerId?`, `CurrentRevisionId`, `CreatedAt`, `CreatedBy`.
 
-The `Quote` holds identity and the pointer to the current revision. It holds **no** prices.
+The `Quote` holds identity and the pointer to the current revision. It holds **no** prices and
+**no status** — status lives on the revision ([STATE-MACHINES §1](STATE-MACHINES.md#1-quote-revision-status)).
+
+Its **commercial outcome** (`WON` / `LOST` / `OPEN`) is likewise not stored: it is derived from the
+append-only status history and is what conversion reporting reads
+([DATA-DICTIONARY §4.1](DATA-DICTIONARY.md#41-conversion-rate-taxa-de-conversão),
+[ADR-0020 §B.2](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md)). A win is
+permanent and dated at the *first* approval — `hasEverWon` is absorbing and so is `WON` once
+reached — but that is not true of the *current* classification of a quote that has never been
+won: `OPEN`/`LOST` may legitimately move back and forth as an unwon quote's current revision
+expires and is later revived by a new one.
+
+Reporting reads that history through a second, distinct rule: for conversion KPIs a quote
+contributes **at most one decision per reporting period**, with a win in the period taking
+precedence over any pre-win loss in it. The status history itself stays append-only and complete —
+the deduplication lives only in how the metric is read (DATA-DICTIONARY §4.1).
 
 ### QuoteRevision (*E*, immutable once issued)
 `Id`, `QuoteId`, `RevisionIndex` (1 = original, displayed without suffix),
@@ -433,6 +448,15 @@ Invariants (the heart of the product):
 
 An item may be **ad-hoc** (no `ProductId`): a free description plus a manual cost. The
 laboratory and quick quotes need this.
+
+When the applicable `FeeRuleVersion` uses `FixedFeeApplication = PerOrder`, each item also carries
+**its allocated share of the single order-level fee** — the value CR-07.3 has always required the
+snapshot to hold alongside the raw fee. The shares are allocated in proportion to line estimated
+cost and sum to exactly one fee per revision
+([CR-07.7](CALCULATION-RULES.md#cr-077--per_order-fee-allocation-across-lines),
+[ADR-0020 §C](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md)); the share
+feeds both the item's suggested price and its `lineFeeAmount`, so the order fee is recovered once
+across the revision rather than once per line.
 
 ### QuoteItemCostSnapshot (*E*, 1:1 with QuoteItem)
 Typed columns for every cost and pricing driver + `Breakdown: jsonb`.
@@ -736,11 +760,11 @@ never their own, and may not perform I/O
 | Event | Raised by | Handled by | Effect |
 |---|---|---|---|
 | `QuoteCreated` | Quoting | Quoting | status history row |
-| `QuoteRevised` | Quoting | Quoting | supersede previous revision, status history |
+| `QuoteRevised` | Quoting | Quoting, **Production** | supersede previous revision, status history; set `HasPendingRevision` on the prior approved revision's non-terminal order ([STATE-MACHINES §3.3](STATE-MACHINES.md#33-has_pending_revision-is-advisory--it-never-blocks)) |
 | `QuoteSent` | Quoting | Quoting | status history |
-| `QuoteApproved` | Quoting | **Production** | create `ProductionOrder` (idempotent) |
-| `QuoteExpired` | Quoting (job) | Quoting | status history |
-| `QuoteCanceled` | Quoting | Quoting, Production | status history; block queued order |
+| `QuoteApproved` | Quoting | **Production** | create `ProductionOrder` (idempotent); cancel a superseded `QUEUED` order ([STATE-MACHINES §3.0](STATE-MACHINES.md#30-the-complete-matrix)) |
+| `QuoteExpired` | Quoting (job) | Quoting, **Production** | status history; re-evaluate `HasPendingRevision` |
+| `QuoteCanceled` | Quoting | Quoting, Production | status history; re-evaluate `HasPendingRevision` — it can never cancel an order, since only an `APPROVED` (terminal) revision has one ([ADR-0020 §A.6](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md)) |
 | `SupplyCostChanged` | Inventory | Inventory | append cost history |
 | `FilamentPriceChanged` | Inventory | Inventory | append price history |
 | `FilamentLotRegistered` | Inventory | Inventory, Finance | stock IN; optional expense |
@@ -753,8 +777,13 @@ never their own, and may not perform I/O
 processed after commit; must not be able to fail the business transaction. A concrete event
 implements **either** `IDomainEvent` **or** `IIntegrationEvent`, never both:
 
-`QuoteApproved` → render quote PDF · `ProductionOrderCreated` → render shop-floor document ·
-`AiInsightRequested` → call OpenAI · `EnergySessionRequested` → poll smart plug.
+`GenerateQuotePdfRequested` → render quote PDF · `ProductionOrderCreated` → render shop-floor
+document · `AiInsightRequested` → call OpenAI · `EnergySessionRequested` → poll smart plug.
+
+*(The PDF event was previously written here as `QuoteApproved`, which is the **synchronous**
+event in the table above — the same name could not implement both interfaces, as the paragraph
+itself requires. [ADR-0012 §1](architecture/ADR-0012-domain-events-and-outbox.md) already names
+the integration event `GenerateQuotePdfRequested`; corrected to match.)*
 
 Each carries an `idempotency_key`, because delivery is at-least-once. Document renders key on
 `render_request_id`, so a retry cannot produce a second `ISSUED` document

@@ -51,17 +51,17 @@ row unresolved has not met its Definition of Done, and the reviewer should rejec
 
 | ID | Area | Decision required | **Decision deadline** | **Implementation deadline** | Status |
 |---|---|---|---|---|---|
-| **H-001** | Quoting / Production | Revision ↔ production lifecycle: behaviour when a superseded revision has an order in each state; whether `has_pending_revision` blocks queue actions; what happens to actual consumption already recorded against a canceled order | **Before S6** | S9 | Open |
+| **H-001** | Quoting / Production | Revision ↔ production lifecycle: behaviour when a superseded revision has an order in each state; whether `has_pending_revision` blocks queue actions; what happens to actual consumption already recorded against a canceled order | **Before S6** | **S6 (Production Core) / S9 (operational)** | **Decision recorded (S6 entry, corrected)** — [ADR-0020 §A](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md); the minimum `ProductionOrder` persistence the `QuoteApproved` transactional invariant needs (§A.8) is now **S6** scope; the operational shop floor (items, material, printer/scheduling UX) remains **S9** |
 | **H-002** | Sales | Sale lifecycle: when a sale may be created from a revision, whether cancellation reverses stock, interaction with a delivered production order, whether partial/multiple sales per revision are permitted | S8 | S8 | Open |
 | **H-003** | Sales / Pricing | Mixed channel and fulfilment: an item-level channel override changes fees per line — how a single sale spanning two channels reports revenue, fees and margin, and whether it is permitted at all | S8 | S8 | Open |
-| **H-004** | Pricing | `PER_ORDER` fixed-fee allocation: rounding of `fixedFee / quantity` across lines, residual-cent assignment, behaviour when quantity changes on a revision | S5 (single-item case) / **S6** (cross-line case) | S5 (single-item case) / **S6** (cross-line case) | **Partially resolved (S5)** — see note below |
+| **H-004** | Pricing | `PER_ORDER` fixed-fee allocation: rounding of `fixedFee / quantity` across lines, residual-cent assignment, behaviour when quantity changes on a revision | S5 (single-item case) / **S6** (cross-line case) | S5 (single-item case) / **S6** (cross-line case) | **Decision recorded (S6 entry)** — single-item case closed by S5; cross-line remainder by [ADR-0020 §C](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md) + [CR-07.7](CALCULATION-RULES.md#cr-077--per_order-fee-allocation-across-lines); implementation owed by S6 |
 | **H-005** | Pricing | Interaction of manual price override, item discount and bracket resolution: precedence, whether an override re-resolves the bracket, how effective margin is reported when all three apply | **S8** | **S8** | **Deadline corrected (S5)** — see note below |
 | **H-006** | Costing / Production | Actual total cost composition: manual lines with no actual counterpart, partial reconciliation, failed units, exact exclusion of wastage from the actual side | **Before S10** | S11 | Open |
 | **H-007 A** | Inventory | Stock movement sign convention and `StockCount` concurrency (two counts of one material racing) | S3 | S3 | **Closed (S3)** — see [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) §1, §3 |
 | **H-007 B** | Inventory / Production | Actual-consumption idempotency: preventing a production item's consumption being recorded twice | S11 | S11 | Open |
 | **H-008 A** | Finance | Expense / double-count model: treatment boundaries and prevention of operator misclassification | S8 | S8 | Open |
 | **H-008 B** | Reporting | Cash Result vs Product Margin consistency across every report surface | **Before S12** | S12 | Open |
-| **H-009 A** | Quoting | **Commercial** conversion semantics: quotes reopened after a terminal state, quotes whose current revision returns to `GENERATED` | **Before S6** | S6 | Open |
+| **H-009 A** | Quoting | **Commercial** conversion semantics: quotes reopened after a terminal state, quotes whose current revision returns to `GENERATED` | **Before S6** | S6 | **Decision recorded (S6 entry)** — [ADR-0020 §B](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md) + [DATA-DICTIONARY §4.1](DATA-DICTIONARY.md#41-conversion-rate-taxa-de-conversão); implementation owed by S6 |
 | **H-009 B** | Reporting | Conversion reporting: cohort labelling of incomplete periods, `null` handling | S12 | S12 | Open |
 | **H-010** | Energy / Costing | Energy tariff availability before the Energy module exists: S4–S9 must price energy from the seeded default tariff without hard-coding a value, and S10 must not retroactively change quotes priced earlier | **Before S4** | S4 | Open |
 
@@ -94,6 +94,69 @@ then have to redo. Flagged explicitly here, and in the S5 delivery report's Open
 section, rather than silently left `Open` against a deadline this same delivery proved
 unmeetable.
 
+### Resolution note for H-001, H-009 A and the H-004 remainder (S6 entry, 2026-09-20)
+
+Mission `VERCE3D-S6-ENTRY-ARCHITECTURE-001` resolved all three rows as a decision-only delivery
+(no runtime code, no migration), recorded in
+[ADR-0020](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md). Independent
+review (`VERCE3D-S6-ENTRY-CODEX-SOL-REVIEW-001`) found three blocking contradictions in that first
+draft; mission `VERCE3D-S6-ENTRY-ARCHITECTURE-CORRECTIONS-001` (same day) corrected all three plus
+three secondary imprecisions, in place, in the same ADR. The description below is the
+**corrected** state:
+
+- **H-001** — §A gives the complete supersession × production-order matrix (including the
+  `CANCELED` and `DELIVERED` rows that had no defined behaviour), decides that
+  `has_pending_revision` is advisory and **never** blocks a queue action, and freezes that actual
+  consumption recorded against a canceled order is never reversed, deleted or transferred. It
+  also corrects the §1.5-vs-§3 contradiction about `DELIVERED` in
+  [STATE-MACHINES](STATE-MACHINES.md). **Correction pass:** two more contradictions were found and
+  fixed — (a) a stray STATE-MACHINES §2 guard blocked revision *creation* on production-order
+  state, contradicting the A.2 matrix itself; removed, since only *approval* can be blocked
+  (§A.7). (b) approval requires synchronous `ProductionOrder` persistence in the same transaction
+  (ADR-0012 §2), which cannot hold against an aggregate assigned entirely to S9; the **minimum**
+  Production Core (§A.8) — the aggregate, its full status enum, `QUEUED` creation, the
+  `QUEUED → CANCELED (SUPERSEDED_BY_REVISION)` transition and `has_pending_revision` — now moves
+  into **S6**; the *operational* shop floor (items, planned/actual material, printer/scheduling
+  UX) stays **S9**. The *decision* deadline (`Before S6`) is met.
+- **H-009 A** — §B derives the quote-level commercial outcome (`WON`/`LOST`/`OPEN`) from the
+  append-only status history instead of the current revision's status, giving **non-retroactive**
+  reporting: revising an approved quote no longer removes a won deal from a closed period, and
+  reviving an expired one no longer removes the loss already recorded. **Correction pass:** the
+  first draft called the whole outcome "monotonic", which is imprecise — only `hasEverWon` is
+  absorbing; a never-won quote's *current* classification can legitimately cycle
+  `OPEN → LOST → OPEN` as it expires and is revived. **Second correction pass (product decision,
+  Option B):** the same-period cardinality is now explicit — for conversion KPIs a quote
+  contributes **at most one decision per `QuoteId` + reporting period**, with precedence
+  `WON > LOST > no contribution`, so expire-then-cancel inside one month is one loss (not two) and
+  expire-then-approve inside one month is one win with zero losses; the append-only history is
+  untouched, the deduplication is a read-time rule only (see
+  [DATA-DICTIONARY §4.1](DATA-DICTIONARY.md#41-conversion-rate-taxa-de-conversão)). Approval makes
+  a revision *sale-eligible*; it never creates a `Sale`, and S6 emits no commercial-conversion
+  event. Implementation is owed by **S6**.
+- **H-004 remainder** — §C freezes that a `PER_ORDER` fee is charged exactly once per revision and
+  allocated across lines in proportion to line estimated cost, with floor + largest-remainder
+  residual cents and a `line_number` tie-break ([CR-07.7](CALCULATION-RULES.md#cr-077--per_order-fee-allocation-across-lines)).
+  This also corrects a latent double-count in CR-07.3/CR-08.3 that charged the order fee once per
+  line. S5's single-line behaviour is unchanged. **Correction pass:** the allocation algorithm and
+  vectors are unchanged; two overstated claims were qualified — "the customer pays the fee exactly
+  once" is now stated as the exact partition invariant `Σ allocatedOrderFee_i = rawOrderFee`
+  (§C.1), and "every line's price rises by the same percentage" is now scoped to the shared
+  pricing basis, exact only when margin is uniform across the group (§C.3). A new §A.7/§C.6 also
+  names precisely which lines recalculate when a revision is constructed (the "pricing-affected
+  line" and dependency-closure concepts), closing the "editing a draft revision" ambiguity a
+  reviewer flagged against ADR-0003's verbatim-copy rule. Implementation is owed by **S6**.
+
+**S6 architecture entry gate: CLEAR.** Every `Before S6` decision deadline is met, and all three
+independent-review blocking findings against the S6-entry package are resolved. This means S6
+implementation may begin *after independent re-review of the corrected ADR-0020* — it does not
+mean S6 is implemented, and it does not close the S6/S9 implementation deadlines above.
+
+Deliberately **not** decided here, and still owed by their own sprints: **H-002** (sale
+lifecycle, including whether more than one `Sale` may reference one approved revision),
+**H-003** (mixed-channel fees), **H-005** (override × discount × bracket precedence) — all S8 —
+and **H-006** (actual total cost composition, including how a canceled order's write-off is
+classified), due before S10.
+
 ### Flag for orchestrator review: H-001 and H-009 A during S5
 
 Per rule 1(b), a `Before S6` decision deadline is nominally an S5 exit requirement. Both H-001
@@ -105,6 +168,11 @@ would be exactly the kind of premature, unreviewed architectural decision CLAUDE
 against. Both rows are left **Open, unchanged**, and are called out again in the S5 report's
 Open Decisions section for the orchestrator to route to whichever sprint is positioned to decide
 them — most plausibly S6 itself, immediately before it needs the answer.
+
+> **Outcome (2026-09-20).** The orchestrator routed both to a dedicated decision-only S6-entry
+> mission, exactly as this note proposed. Both are now resolved — see the resolution note above
+> and [ADR-0020](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md). This
+> paragraph is kept for traceability of how they were routed.
 
 **Why some decisions precede their implementation.** H-001 and H-009 A are due *before S6*
 because S6 builds the quote engine: if revision-vs-production behaviour or the commercial meaning

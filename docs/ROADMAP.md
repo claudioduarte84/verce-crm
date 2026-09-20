@@ -359,6 +359,14 @@ overlap is rejected by the database, never by application code alone.
 
 ## S6 — Quote Engine
 
+> **Architecture entry gate: CLEAR.** The three `Before S6` debts (H-001, H-009 A, H-004
+> remainder) are decided in
+> [ADR-0020](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md), corrected
+> after independent review to remove a revision-creation guard that contradicted the H-001
+> matrix and to move the minimum `ProductionOrder` persistence `QuoteApproved` needs into this
+> sprint (§A.7/§A.8); S6 implements those decisions rather than inventing them. See
+> [ARCHITECTURE-DEBT](ARCHITECTURE-DEBT.md#resolution-note-for-h-001-h-009-a-and-the-h-004-remainder-s6-entry-2026-09-20).
+
 - `Quote` / `QuoteRevision` / `QuoteItem` / `QuoteItemCostSnapshot` / `QuoteStatusHistory`.
 - Numbering: `quote_number_counter`, the atomic upsert, `YYMMDD-N`, with a **concurrency
   integration test** using parallel writers (ADR-0004).
@@ -367,9 +375,36 @@ overlap is rejected by the database, never by application code alone.
   policy (only changed items).
 - Full state machine with guards and history; `ExpireQuotesJob`.
 - Snapshot writing: typed columns + `breakdown` JSONB.
+- **`PER_ORDER` fee allocation across lines** (ADR-0020 §C / CR-07.7): cost-proportional basis,
+  floor + largest-remainder residual cents, `line_number` tie-break, total recomputation on every
+  draft edit, and the A–G canonical vectors as named tests. Adds the allocated share to the item
+  snapshot (additive column).
+- **Derived commercial outcome** (ADR-0020 §B): `WON`/`LOST`/`OPEN` computed from the append-only
+  status history, never stored; conversion counts that a later revision cannot move. Period KPIs
+  deduplicate by `QuoteId` + reporting period with `WON` before `LOST` (CR-12.1,
+  DATA-DICTIONARY §4.1), so one quote can never be counted twice in one period.
+- **Approval contract** (ADR-0020 §A): `QuoteApproved` creates the production order idempotently
+  on `QuoteRevisionId`, plus the `QuoteRevised`/`QuoteCanceled`/`QuoteExpired` handlers that keep
+  `has_pending_revision` truthful.
+- **Minimum Production Core** (ADR-0020 §A.8): the `ProductionOrder` aggregate, its full status
+  enum, `QUEUED` creation from `QuoteApproved`, the `QUEUED → CANCELED (SUPERSEDED_BY_REVISION)`
+  transition and `HasPendingRevision` — the slice required for the `QuoteApproved` transaction to
+  be correct. **No operational production workflow ships in S6** — no queue UI, no items, no
+  planned/actual material, no shop-floor document; those remain S9 (below).
+- **Revision construction is clone-then-recalculate, never an in-place edit** (ADR-0020 §A.7):
+  "editing a quote" always constructs a new revision candidate from the current one; the only
+  automatic, non-user-triggered recalculation crosses a `PER_ORDER` fee group's lines (the
+  dependency closure in ADR-0020 §C.6), never a sibling line's own cost or price.
 
 **Exit (critical test):** create a quote, change every underlying price, reopen the quote —
-every number is unchanged and the breakdown still explains it.
+every number is unchanged and the breakdown still explains it. Additionally: a `PER_ORDER` fee on
+a multi-line revision sums to exactly one fee; approving-then-revising a quote leaves its recorded
+win in its original period; a quote that expires and is then canceled again inside one period
+counts as exactly one loss for that period, and one that expires and is then approved inside one
+period counts as one win and zero losses; a new revision can always be created regardless of a
+previous revision's production-order state, and only its *approval* can be blocked; approving a
+quote creates a real, idempotent `ProductionOrder` row in `QUEUED` with no operational workflow
+attached to it yet.
 
 ---
 
@@ -418,8 +453,18 @@ is impossible; the monthly cost figure excludes inventory purchases.
 
 ## S9 — Production & Labels
 
-- `ProductionOrder` created idempotently from `QuoteApproved`; unique on `quote_revision_id`;
-  full state machine; planned material explosion snapshot.
+> **Scope correction (ADR-0020 §A.8).** The `ProductionOrder` aggregate, its idempotent `QUEUED`
+> creation from `QuoteApproved`, and the `QUEUED → CANCELED` supersession transition are **S6**
+> scope — the minimum Production Core the `QuoteApproved` transactional invariant needs. S9
+> extends that same aggregate operationally; it does not create it.
+
+- `ProductionOrderItem`, planned material explosion snapshot and actual material recording,
+  against the `ProductionOrder` S6 already persists (unique on `quote_revision_id`).
+- The **operational** transitions of the full state machine:
+  `QUEUED → IN_PRODUCTION → READY → SHIPPED → DELIVERED`, plus operator-initiated cancellation
+  from any non-terminal state. The `QUEUED → CANCELED (SUPERSEDED_BY_REVISION)` path and the
+  `PRODUCTION_ORDER_IN_PROGRESS` approval guard already exist from S6; S9 is where an operator can
+  first act on a `QUEUED` order at all.
 - The §3 rules of [STATE-MACHINES](STATE-MACHINES.md#3-altering-an-approved-quote):
   automatic supersession when `QUEUED`, blocking with `PRODUCTION_ORDER_IN_PROGRESS` otherwise.
 - Production queue UI (kanban or list), order detail, shop-floor document
@@ -432,8 +477,9 @@ is impossible; the monthly cost figure excludes inventory purchases.
   demonstrates per-template logo selection — `SPECIFIC_ASSET` → `SYMBOL` — against the
   proposal's full signature and the app's horizontal logo.
 
-**Exit:** approving twice produces exactly one order; the shop-floor document is correct after
-the underlying recipe is edited.
+**Exit:** an order created in S6 can be driven all the way through
+`QUEUED → IN_PRODUCTION → READY → SHIPPED → DELIVERED` from the new queue UI; the shop-floor
+document is correct after the underlying recipe is edited.
 
 ---
 

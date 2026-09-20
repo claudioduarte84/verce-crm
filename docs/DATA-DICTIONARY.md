@@ -211,24 +211,124 @@ Every metric below is derived from transactional tables. None is materialized in
 
 > **Formal definition.** The share of **decided** quotes that were approved.
 
-```
-decided(period)  = quotes whose current revision reached APPROVED, CANCELED or EXPIRED
-                   within the period
-approved(period) = subset of decided(period) whose current revision status is APPROVED
+*(H-009 A closed by [ADR-0020 §B.2](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md).
+The definition below was previously keyed on the **current revision's** status, which silently
+removed a won quote from a closed period as soon as anyone revised it, and removed a lost quote
+from its period as soon as anyone revived it. Outcomes are now derived from the append-only
+status history and never move once recorded.)*
 
-conversionRate(period) = decided > 0 ? approved / decided : null
+*(Same-period cardinality frozen 2026-09-20 — product decision **Option B**, applied by mission
+`VERCE3D-S6-H009A-PERIOD-DEDUPE-001`. The previous draft defined `lost(period)` as one entry per
+eligible **transition**, which let a single quote that expired and was then canceled again inside
+one January contribute **two** denominator entries, and let a quote that expired and was then
+approved inside one January contribute to `lost` **and** `won` simultaneously. Both contradicted
+this section's own "never counted twice within the same period" guarantee. The KPI is now
+deduplicated by `QuoteId` + reporting period, with `WON` taking precedence.)*
+
+The outcome belongs to the **quote** and is **derived** (never stored). It is **not** uniformly
+"monotonic" — that overstated an earlier draft of this definition (correction pass,
+2026-09-20, MEDIUM-01): only the *fact of having ever won* is absorbing; the *current*
+classification of a quote that has never won can legitimately move back and forth:
+
 ```
+firstApprovalAt(quote) = MIN(changed_at) over quote_status_history rows of this quote's
+                         revisions WHERE to_status = 'APPROVED'      -- null if never approved
+
+hasEverWon(quote) = firstApprovalAt is not null      -- MONOTONIC: false → true, never back
+
+commercialOutcome(quote) =     -- the CURRENT classification, read at any instant
+    WON    if hasEverWon(quote)
+    LOST   if NOT hasEverWon(quote) AND the current revision is CANCELED or EXPIRED
+    OPEN   otherwise
+```
+
+`commercialOutcome` itself is monotonic **only once it reaches `WON`** — from there it never
+changes. Before that, a never-won quote's current outcome can cycle `OPEN → LOST → OPEN`: its
+revision expires or is canceled (`OPEN → LOST`), and a later revision revives it
+(`LOST → OPEN` — reviving is not itself a decision). This is expected, matches
+[STATE-MACHINES §1.6](STATE-MACHINES.md#16-expiration)'s revival rule, and is exactly why period
+metrics are computed from the **history**, never from the live `commercialOutcome` of every quote
+as of today.
+
+#### The period KPI: one decision per quote per period
+
+The reporting unit is a **quote-period decision**: for one `QuoteId` and one reporting period, a
+quote contributes **at most one** closed-decision outcome, resolved by precedence
+`WON > LOST > no contribution`:
+
+```
+periodOutcome(quote, period) =
+    WON    if firstApprovalAt(quote) falls inside the period
+    LOST   else if the quote has ≥ 1 eligible pre-win CANCELED/EXPIRED transition inside the
+                period — "eligible" meaning it occurred while the quote had no earlier
+                APPROVED transition (i.e. strictly before firstApprovalAt, or at any time if
+                the quote was never approved)
+    —      otherwise (no closed decision in this period)
+
+won(period)     = count of DISTINCT QuoteIds with periodOutcome = WON
+lost(period)    = count of DISTINCT QuoteIds with periodOutcome = LOST
+decided(period) = won(period) + lost(period)
+
+conversionRate(period) = decided > 0 ? won / decided : null
+```
+
+Equivalently, and this is the clearer way to implement it: take the eligible decision history,
+group it by `QuoteId` + reporting period, and classify each group once — win in the period wins,
+otherwise any pre-win loss in the period, otherwise nothing. No quote can appear in `won(period)`
+and `lost(period)` for the same period, and no quote can appear twice in either.
+
+Worked cases (all in the organization timezone, rule 4 below):
+
+| Quote's history | Jan | Feb | Mar |
+|---|---|---|---|
+| Jan 03 `EXPIRED`, never revived | `LOST` | — | — |
+| Jan 03 `EXPIRED`, Jan 10 revived, Jan 20 `CANCELED` | `LOST` (**1, not 2**) | — | — |
+| Jan 03 `EXPIRED`, Jan 10 revived, Jan 20 `APPROVED` | `WON` (**and `LOST` = 0**) | — | — |
+| Jan 03 `EXPIRED`, Feb 10 revived, Feb 20 `CANCELED` | `LOST` | `LOST` | — |
+| Jan 03 `EXPIRED`, Mar 20 first `APPROVED` | `LOST` | — | `WON` |
+| Mar 10 revision A `APPROVED`, Apr 10 revision B `APPROVED` | — | — | `WON` in Mar; **Apr contributes nothing** |
 
 Rules that make this honest:
 
-1. **The unit is the quote, not the revision.** A quote revised four times counts once.
+1. **The counting unit is one quote-period decision** — not one lifecycle transition, and not one
+   lifetime slot per quote. Inside a single period a quote is counted **at most once**, with
+   `WON` beating `LOST`; across its lifetime it may be counted in several periods, but it can
+   enter `won()` **at most once ever** (keyed on `firstApprovalAt`). Revisions never multiply the
+   count: a quote revised four times inside one negotiation, expiring and being revived twice
+   along the way, still contributes exactly one outcome to each period in which it was decided.
 2. **A quote still open is not a failure.** `GENERATED`, `SENT` and `NEGOTIATING` are excluded
    from numerator *and* denominator, and are reported separately as *"orçamentos em aberto"*.
 3. `SUPERSEDED` is never an outcome — it is an internal transition between revisions.
-4. The period is keyed on the **decision date** (the status-history row that produced the
-   terminal state), not the creation date.
+4. The period is keyed on the **decision date** (the `changed_at` of the status-history row that
+   produced the terminal state, or of the first `APPROVED` row for a win), not the creation date,
+   and it is bucketed in the **organization timezone** — the same `America/Sao_Paulo` clock
+   `ValidUntil` and every other business date already use. No new calendar rule is introduced.
 5. When `decided = 0`, the metric is `null` and renders as `—`. It is never rendered as 0%,
    which would read as total failure.
+6. **A win is permanent and dated once.** Revising an approved quote — or approving the
+   superseding revision — never un-wins it and never produces a second win: that is the same deal
+   at a new scope, so a later period gains **nothing** from it. This mirrors production, where the
+   original approval stands if the superseding revision falls through
+   ([STATE-MACHINES §3](STATE-MACHINES.md#3-altering-an-approved-quote)).
+7. **Losses count only before a quote has ever been won**, and a period's loss is dated to that
+   period — but a period counts at most one of them however many eligible transitions it holds
+   (rule 1). A quote lost in January and won in March is a loss in January *and* a win in March:
+   both were true when reported, and **no closed period ever changes**. That stability is the
+   point; the cost is that such a quote is counted in two periods — once per period, never twice
+   in one.
+8. A won quote may still have a non-terminal current revision (an active re-negotiation). It
+   legitimately appears in both the historical won count and *"orçamentos em aberto"*; the UI
+   must label that case rather than hide it.
+9. Reversal of a won deal is a **Sales** fact, not a quote one — there is no "un-approve". A
+   canceled `Sale` leaves every revenue metric while the quote stays won
+   ([DOMAIN-MODEL §9](DOMAIN-MODEL.md#9-sales-module)).
+10. **Deduplication is a reporting rule, not a history rule.** `quote_status_history` stays
+    append-only and complete: every `APPROVED`, `CANCELED` and `EXPIRED` transition is recorded,
+    auditable and visible on the revision timeline, including the second January cancellation that
+    the January KPI does not count a second time. Nothing is deleted, collapsed, back-dated or
+    hidden — the grouping above exists only in how the metric reads that history. No table, column
+    or event is introduced to store a period outcome; it is derived on read, like every other
+    metric in this section.
 
 **Secondary metric — cohort conversion** *(conversão por safra)*:
 ```

@@ -113,7 +113,7 @@ receive the pointer.
 | `ValidUntil < today(org tz)` | `QUOTE_REVISION_EXPIRED` |
 | The quote has no items | `QUOTE_HAS_NO_ITEMS` |
 | Any item has a non-positive final price | `QUOTE_ITEM_INVALID_PRICE` |
-| A production order for a **previous** revision of this quote is beyond `QUEUED` | `PRODUCTION_ORDER_IN_PROGRESS` (see §3) |
+| A production order for a **previous** revision of this quote is in `IN_PRODUCTION`, `READY` or `SHIPPED` — i.e. **non-terminal and not `QUEUED`** ([ADR-0020 §A.3](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md)) | `PRODUCTION_ORDER_IN_PROGRESS` (see §3) |
 
 Approval, production-order creation and the status history row all happen in **one transaction**
 — spanning several save/dispatch waves, since the `QuoteApproved` handler creates an aggregate
@@ -150,16 +150,40 @@ history, which rule 5 of CLAUDE.md forbids.
 
 ## 2. Revision creation (edit semantics)
 
-Editing a quote **never** mutates a revision. `EditQuote` is:
+> **BLOCKING-01 correction ([ADR-0020 §A.1](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md)).**
+> An earlier draft of step 2 below gated revision **creation** on the state of a previous
+> production order. That directly contradicted §3.0's matrix, where *creating* `R(n+1)` is
+> `allowed` in every single row. The guard never belonged here: **creating a revision is never
+> blocked by the state of a previous revision's `ProductionOrder`.** Only **approving** the new
+> revision can be blocked, and only by the §1.5 guard (`PRODUCTION_ORDER_IN_PROGRESS`, restated in
+> §3.2 step 2). Removed accordingly.
+
+Editing a quote **never** mutates a persisted revision — there is no mutable "draft revision" in
+this domain. What the UI calls "editing a quote" is always **constructing a new revision**: clone
+the current one into an in-memory candidate, apply the change to that candidate, recalculate only
+what the change actually affects, then persist the candidate as `R(n+1)` in one atomic step. The
+persisted `R(n)` is never touched except for the two fields §1.2 already allows
+(`Status`, `SupersededByRevisionId`).
+
+`EditQuote` is:
 
 ```
-1. Load current revision R(n).
-2. Guard: quote is not blocked by an in-progress production order (§3, case B).
-3. Deep-clone R(n) → R(n+1): items, snapshots, customer snapshot, notes.
-4. Apply the requested changes to R(n+1).
-5. Re-resolve prices/costs ONLY for items the user changed;
-   untouched items keep their original snapshot verbatim.
-6. R(n+1).RevisionIndex = R(n).RevisionIndex + 1
+1. Load current, persisted revision R(n). It is immutable and stays untouched throughout.
+2. Construct a revision candidate by deep-cloning R(n): items, snapshots, customer snapshot,
+   notes. The candidate exists only in memory; it has no identity of its own until step 7 and is
+   never itself persisted before the requested change is applied.
+3. Apply the requested commercial changes to the candidate (quantity, product, manual cost,
+   discount, line add/remove, customer/content fields, ...).
+4. Determine the candidate's pricing-affected lines and recalculate ONLY their derived pricing
+   fields (see ADR-0020 §A.7 for the exact dependency-closure rule — it is not simply "the lines
+   the user touched", because a PER_ORDER fee group couples lines together). Every other field of
+   every other line — and every field of a pricing-affected line that is not itself derived from
+   a changed input — is copied verbatim from R(n).
+5. Validate the complete candidate (CR-07.1's denominator guard and the other item/revision
+   invariants).
+6. Persist the validated candidate as R(n+1) — this is the only point at which it becomes a real,
+   immutable revision:
+   R(n+1).RevisionIndex = R(n).RevisionIndex + 1
    R(n+1).Status        = GENERATED
    R(n+1).SourceRevisionId = R(n).Id
    R(n+1).ValidUntil    = today(org tz) + validityDays
@@ -170,10 +194,20 @@ Editing a quote **never** mutates a revision. `EditQuote` is:
 9. Raise QuoteRevised.
 ```
 
-Step 5 is deliberate: re-pricing an untouched item because a filament price moved would violate
-the snapshot rule from the operator's point of view ("I only changed the quantity of item 2 and
-item 1 got more expensive"). Re-resolution is an explicit user action
-(*"Atualizar preços para os valores atuais"*), which marks the affected items in the UI.
+There is **no production-order guard anywhere in this sequence** — see the correction box above.
+`Quote.Version` (CLAUDE.md rules 21/28) is the only thing that can make step 1's load stale, and
+that is ordinary optimistic concurrency (`CONCURRENCY_CONFLICT`), not a business rule.
+
+Step 4 is deliberate and narrow: recalculating a line the operator did not touch, and that no
+changed input feeds, would violate the snapshot rule from the operator's point of view ("I only
+changed the quantity of item 2 and item 1 got more expensive"). A line's **own** cost is never
+silently re-resolved against a current filament price or recipe just because a sibling line
+changed — that remains the explicit, user-triggered *"Atualizar preços para os valores atuais"*
+action. The one narrow, automatic exception is the `PER_ORDER` allocation dependency defined in
+[ADR-0020 §A.7](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md): lines
+that share a fee group are commercially coupled by construction, so a change to one line's basis
+necessarily changes every other line's allocated share, whether the operator touched that other
+line or not.
 
 ### Revision suffix
 
@@ -216,7 +250,36 @@ cannot rewrite the identity of documents already issued.
 This is the rule the brief asked to be defined explicitly. Behaviour depends on how far the
 linked production order has gone.
 
-### Case A — no production order, or the order is still `QUEUED`
+> **H-001 closed by [ADR-0020](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md).**
+> §3.0 below states the complete per-state matrix (the two grouped cases that follow left
+> `CANCELED` undefined and disagreed with §1.5 about `DELIVERED`), §3.3 decides that
+> `has_pending_revision` never blocks queue actions, and §3.4 decides what happens to actual
+> consumption recorded against a canceled order.
+
+### 3.0 The complete matrix
+
+`R(n)` is the approved revision that owns the production order; `R(n+1)` is the newer revision.
+
+| `R(n)` order state | Creating `R(n+1)` | Approving `R(n+1)` |
+|---|---|---|
+| *(no order)* | allowed | create order for `R(n+1)` |
+| `QUEUED` | allowed; set `HasPendingRevision` | cancel `R(n)`'s order (`SUPERSEDED_BY_REVISION`, `SupersededByOrderId` = new order); create order for `R(n+1)` |
+| `IN_PRODUCTION` | allowed; set `HasPendingRevision` | **rejected** — `PRODUCTION_ORDER_IN_PROGRESS` |
+| `READY` | allowed; set `HasPendingRevision` | **rejected** — `PRODUCTION_ORDER_IN_PROGRESS` |
+| `SHIPPED` | allowed; set `HasPendingRevision` | **rejected** — `PRODUCTION_ORDER_IN_PROGRESS` |
+| `DELIVERED` | allowed; **no flag** | allowed; create order for `R(n+1)`; the delivered order is **left untouched** |
+| `CANCELED` | allowed; **no flag** | allowed; create order for `R(n+1)`; the canceled order is **left untouched** |
+
+Two rules govern every row: **creating** a revision is never blocked by the shop floor, and a
+**terminal** order (`DELIVERED`, `CANCELED`) never blocks approval and is never mutated by it.
+`SupersededByOrderId` is set **only** on an order actually canceled because it was superseded —
+never on a delivered one, which was not replaced but fulfilled.
+
+Because a new revision is a clone (§2), approving one after a `DELIVERED` order creates an order
+for the new revision's **full** quantity; the system does not diff against what was already
+delivered. Repeat business is usually better modelled as a **new quote**.
+
+### 3.1 Case A — no production order, or the order is still `QUEUED`
 
 **Automatic supersession.**
 
@@ -234,9 +297,13 @@ linked production order has gone.
    returns to the normal queue, still linked to the still-APPROVED R(n).
 ```
 
-### Case B — the production order is `IN_PRODUCTION`, `READY`, `SHIPPED` or `DELIVERED`
+### 3.2 Case B — the production order is `IN_PRODUCTION`, `READY` or `SHIPPED`
 
 **Blocking, not silent mutation.**
+
+*(`DELIVERED` was listed here originally and is not: it is terminal, so by step 3 below approval
+proceeds. Corrected in [ADR-0020 §A.3](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md);
+see the matrix in §3.0.)*
 
 ```
 1. Creating a new revision is ALLOWED — the commercial conversation must never be blocked by
@@ -255,9 +322,70 @@ decision; partially amending an order (a "change order" that diffs the two revis
 a delta) is genuinely useful but is a multi-sprint feature with its own reconciliation rules.
 It is recorded as a **deferred capability**, not as an omission.
 
+### 3.3 `has_pending_revision` is advisory — it never blocks
+
+The flag **blocks nothing**. It does not gate `QUEUED → IN_PRODUCTION` or any other production
+transition; it drives the *"aguardando nova aprovação"* badge and a non-blocking warning when an
+operator starts work while a revision is pending.
+
+The flag means *a revision is pending approval*, and Case A step 2 is explicit that it may never
+be approved. Idling a printer for a negotiation that may be abandoned costs real throughput; and
+if the operator does start, Case B is exactly the safety valve — the **approval** is then blocked
+until the order is resolved. This is the same warn-never-refuse posture stock already uses
+([CR-13.11](CALCULATION-RULES.md#cr-1311--stock-is-advisory): "stock is advisory").
+
+It is a **cached projection**, maintained in the same transaction as the revision transition that
+changes it, and defined by:
+
+```
+order.HasPendingRevision ⇔ the order is non-terminal
+                           AND its quote has a revision newer than the order's own source
+                               revision whose status is non-terminal
+                               (GENERATED | SENT | NEGOTIATING)
+```
+
+So it is set when a newer revision appears over a non-terminal order; cleared when that revision
+reaches `CANCELED`, `EXPIRED` or `SUPERSEDED` and no other non-terminal newer revision remains
+(Case A step 4 — the order returns to the queue with **no** state transition, having never been
+canceled); consumed when the newer revision is `APPROVED` (§3.0 then applies); and never set on a
+terminal order. `QuoteRevised`, `QuoteCanceled` and `QuoteExpired` each re-evaluate it
+synchronously ([DOMAIN-MODEL §15](DOMAIN-MODEL.md#15-domain-events)).
+
+### 3.4 Actual consumption recorded against a canceled order
+
+Recorded actual consumption is an **immutable physical fact**. Canceling an order — whether by
+the operator or by supersession — never reverses it, never deletes it and never re-points it:
+
+- `production_order_item_actual_material` rows and the `StockMovement(OUT)` they emitted stand
+  permanently; the ledger is append-only ([ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md))
+  and `unit_cost_at_consumption` was frozen at consumption time
+  ([ADR-0006 §2](architecture/ADR-0006-estimated-vs-actual-cost.md)). Material really left the
+  shelf. This is §4.2's "consumed material stays consumed", extended to the supersession path.
+- Consumption is **never transferred** to the superseding order, which starts at zero actual
+  consumption with its own planned BOM, so its variance measures only its own work.
+- A canceled order can therefore carry real actual cost with no delivered output. That cost stays
+  attributable to that order and must never be absorbed into the superseding order or into a
+  `Sale` referencing a different revision.
+
+How that write-off is **classified** in the actual-vs-estimated report — the same question as a
+`FAILED` item's wastage (§4.4) — is **H-006**'s scope (due before S10), which must honour the
+invariant above.
+
 ---
 
 ## 4. Production order status
+
+> **Ownership split ([ADR-0020 §A.8](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md), BLOCKING-03 correction).**
+> The `QuoteApproved` guard in §1.5 and the idempotent creation in §4.3 are part of the Quote
+> approval transaction, so the minimum `ProductionOrder` persistence and state values they depend
+> on are **S6** scope, not S9. Concretely, S6 owns: the aggregate, the `QUEUED` creation and the
+> `QUEUED → CANCELED (SUPERSEDED_BY_REVISION)` transition, the full status **enum** (so the §1.5
+> guard can type-check against `IN_PRODUCTION`/`READY`/`SHIPPED`/`DELIVERED`), and
+> `has_pending_revision`. **S9** owns everything that moves an order through the rest of this
+> state machine operationally — `QUEUED → IN_PRODUCTION → READY → SHIPPED → DELIVERED`, the
+> printer/scheduling UX, items, planned/actual material and the shop-floor document. Until S9
+> ships, an S6 order can be created and (if superseded while `QUEUED`) canceled, but nothing moves
+> it past `QUEUED` under its own power.
 
 ### 4.1 States
 
