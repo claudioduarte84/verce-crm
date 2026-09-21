@@ -201,4 +201,65 @@ public class FeeRuleTests
         var version = rule.AddVersion(new DateOnly(2026, 1, 1), null, 0.10m, 5m, FixedFeeApplication.PerUnit, null, null, null);
         version.CommissionPercent.Should().Be(0.10m);
     }
+
+    // B-03: a PER_ORDER/PerUnit fixed fee is a BRL amount and must carry exact whole-cent
+    // precision — a fractional-cent fee (e.g. 1.005) breaks PerOrderFeeAllocator's exact-partition
+    // invariant (sum(alloc) == orderFee), so it is rejected at construction time, never
+    // silently rounded/truncated. Only NEW versions are affected — no pre-existing row is rewritten.
+    [Theory]
+    [InlineData(1.00)]
+    [InlineData(1.01)]
+    [InlineData(0)]
+    [InlineData(10.99)]
+    public void Fixed_fee_with_exact_cent_precision_is_accepted(decimal fixedFee)
+    {
+        var rule = new FeeRule(Guid.NewGuid(), "Test rule");
+        var version = rule.AddVersion(new DateOnly(2026, 1, 1), null, 0.10m, fixedFee, FixedFeeApplication.PerUnit, null, null, null);
+        version.FixedFee.Should().Be(fixedFee);
+    }
+
+    [Theory]
+    [InlineData(1.005)]
+    [InlineData(0.001)]
+    [InlineData(2.999)]
+    public void Fixed_fee_with_a_fractional_cent_is_rejected(decimal fixedFee)
+    {
+        var rule = new FeeRule(Guid.NewGuid(), "Test rule");
+        var act = () => rule.AddVersion(new DateOnly(2026, 1, 1), null, 0.10m, fixedFee, FixedFeeApplication.PerUnit, null, null, null);
+        act.Should().Throw<ArgumentException>().WithMessage("FIXED_FEE_PRECISION_INVALID");
+    }
+
+    [Fact]
+    public void Minimum_fee_with_a_fractional_cent_is_rejected()
+    {
+        var rule = new FeeRule(Guid.NewGuid(), "Test rule");
+        var act = () => rule.AddVersion(new DateOnly(2026, 1, 1), null, 0.10m, 5m, FixedFeeApplication.PerUnit, minimumFee: 1.005m, maximumFee: null, notes: null);
+        act.Should().Throw<ArgumentException>().WithMessage("FIXED_FEE_PRECISION_INVALID");
+    }
+
+    [Fact]
+    public void Maximum_fee_with_a_fractional_cent_is_rejected()
+    {
+        var rule = new FeeRule(Guid.NewGuid(), "Test rule");
+        var act = () => rule.AddVersion(new DateOnly(2026, 1, 1), null, 0.10m, 5m, FixedFeeApplication.PerUnit, minimumFee: null, maximumFee: 9.995m, notes: null);
+        act.Should().Throw<ArgumentException>().WithMessage("FIXED_FEE_PRECISION_INVALID");
+    }
+
+    [Fact]
+    public void Commission_percent_precision_is_left_untouched_by_the_B03_guard()
+    {
+        // Commission is a fraction (CLAUDE.md rule 4), not a BRL amount — B-03 explicitly scopes
+        // the precision guard to fixed/minimum/maximum fee only.
+        var rule = new FeeRule(Guid.NewGuid(), "Test rule");
+        var version = rule.AddVersion(new DateOnly(2026, 1, 1), null, 0.123456m, 5m, FixedFeeApplication.PerUnit, null, null, null);
+        version.CommissionPercent.Should().Be(0.123456m);
+    }
+
+    [Fact]
+    public void Negative_fixed_fee_precision_check_never_masks_the_pre_existing_negative_fee_guard()
+    {
+        var rule = new FeeRule(Guid.NewGuid(), "Test rule");
+        var act = () => rule.AddVersion(new DateOnly(2026, 1, 1), null, 0.10m, -1.00m, FixedFeeApplication.PerUnit, null, null, null);
+        act.Should().Throw<ArgumentException>().WithMessage("FEE_RULE_VERSION_FIXED_FEE_INVALID");
+    }
 }

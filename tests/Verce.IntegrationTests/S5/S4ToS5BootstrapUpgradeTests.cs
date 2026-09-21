@@ -210,6 +210,14 @@ public sealed class S4ToS5BootstrapUpgradeTests : IAsyncLifetime
             applied.Should().Contain(S5FinalMigration, "the final S5 migration must be the one actually applied — not an earlier approximation");
         }
 
+        // H-03: this suite's own binary now also ships the LATER S6 migration
+        // (AddS6QuotingAndProductionCore), which is "pending" against a database frozen at
+        // S5FinalMigration — but PricingSeedService's readiness check is schema-aware (it checks
+        // for the ONE migration that creates pricing.sales_channel/fee_rule/fee_rule_version by
+        // name, not "zero pending migrations anywhere"), so it correctly runs here exactly as a
+        // genuine S4-to-S5-only deployment's binary would. Stage 3 below boots the REAL
+        // application and the REAL PricingSeedService seeds the canonical DIRECT channel —
+        // never a manual row injection standing in for it.
         // ================= Stage 3: REAL application bootstrap against the upgraded database =================
         Guid directChannelId;
         await using (var s5Factory = NewFactory())
@@ -222,7 +230,8 @@ public sealed class S4ToS5BootstrapUpgradeTests : IAsyncLifetime
             var (owner, loginSucceeded) = await LogInExistingOwnerAsync(s5Factory, ownerEmail);
             loginSucceeded.Should().BeTrue("the pre-existing S4 Owner's credentials must survive the S5 upgrade unchanged");
 
-            // ---- Canonical DIRECT seed, produced by the REAL PricingSeedService via normal startup ----
+            // ---- Canonical DIRECT seed: produced by the REAL PricingSeedService during this
+            // factory's own startup (H-03) — never a manually-inserted row standing in for it ----
             var channels = await ReadAsync<IReadOnlyList<SalesChannelResponse>>(await owner.GetAsync("/api/pricing/channels"));
             var direct = channels.Should().ContainSingle(x => x.Code == "DIRECT").Which;
             direct.Kind.Should().Be(SalesChannelKind.Direct);

@@ -14,9 +14,14 @@ using Verce.Api.Costing;
 using Verce.Api.Inventory;
 using Verce.Api.Outbox;
 using Verce.Api.Pricing;
+using Verce.Api.Quoting;
 using Verce.Api.Settings;
+using Verce.Modules.Production;
+using Verce.Modules.Quoting;
+using Verce.Modules.Quoting.Contracts;
 using Verce.Platform.Identity;
 using Verce.Platform.Persistence;
+using Verce.Platform.UnitOfWork;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -59,6 +64,20 @@ builder.Services.AddScoped<Verce.Modules.Costing.ICostingInventoryReader, Verce.
 builder.Services.AddHostedService<Verce.Modules.Settings.SettingsSeedService>();
 builder.Services.AddHostedService<Verce.Modules.Inventory.InventorySeedService>();
 builder.Services.AddHostedService<Verce.Modules.Pricing.PricingSeedService>();
+
+// ---- S6 (ADR-0020 §A.6/§A.8): the QuoteApproved/-Revised/-Canceled/-Expired synchronous
+// contract, handled by Production. Registered explicitly — there is no assembly-scanning
+// auto-registration for domain event handlers (Verce.Platform.UnitOfWork.DomainEventDispatcher
+// resolves IServiceProvider.GetServices<IDomainEventHandler<T>>() in registration order). ----
+builder.Services.AddScoped<IDomainEventHandler<QuoteApprovedEvent>, CreateProductionOrderOnQuoteApproved>();
+builder.Services.AddScoped<IDomainEventHandler<QuoteRevisedEvent>, MaintainHasPendingRevisionOnQuoteRevised>();
+builder.Services.AddScoped<IDomainEventHandler<QuoteCanceledEvent>, ClearHasPendingRevisionOnQuoteCanceled>();
+builder.Services.AddScoped<IDomainEventHandler<QuoteExpiredEvent>, ClearHasPendingRevisionOnQuoteExpired>();
+
+builder.Services.Configure<Verce.Modules.Quoting.ExpireQuotesJobOptions>(
+    builder.Configuration.GetSection("Quoting:Expiration"));
+builder.Services.AddScoped<Verce.Modules.Quoting.ExpireQuotesService>();
+builder.Services.AddVerceQuotingScheduling(builder.Configuration);
 
 // ---- Authentication: same-origin cookie, no bearer/JWT (ADR-0009 §1, SECURITY §2) ----
 // The cookie scheme(s) must be explicitly ADDED, not merely configured — ConfigureApplicationCookie
@@ -176,6 +195,7 @@ app.MapSupplyEndpoints();
 app.MapCostingEndpoints();
 app.MapProductEndpoints();
 app.MapPricingEndpoints();
+app.MapQuotingEndpoints();
 
 // ---- Health endpoints (ADR-0012 §25, OPERATIONS §9): status word only, anonymous ----
 app.MapGet("/health/live", () => Results.Text("healthy")).AllowAnonymous();

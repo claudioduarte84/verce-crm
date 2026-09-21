@@ -2207,6 +2207,382 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    page?: number | string;
+                    pageSize?: number | string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteListResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["QuoteCreateRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/conversion-rate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    from: string;
+                    to: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ConversionRatePeriodResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{id}/revise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["QuoteReviseRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["QuoteVersionedRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{id}/negotiate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["QuoteVersionedRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["QuoteCancelRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["QuoteVersionedRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2364,6 +2740,20 @@ export interface components {
             currency: string;
             /** Format: int64 */
             version: number | string;
+        };
+        ConversionRatePeriodResponse: {
+            /** Format: date */
+            periodStart: string;
+            /** Format: date */
+            periodEndExclusive: string;
+            /** Format: int32 */
+            won: number | string;
+            /** Format: int32 */
+            lost: number | string;
+            /** Format: int32 */
+            decided: number | string;
+            /** Format: double */
+            conversionRate: null | number | string;
         };
         CostCalculationRequest: {
             materials: null | components["schemas"]["CostingMaterialRequest"][];
@@ -2925,6 +3315,253 @@ export interface components {
             notes: null | string;
             /** Format: int64 */
             supplyVersion: number | string;
+        };
+        QuoteCancelRequest: {
+            reason: string;
+            /** Format: int64 */
+            quoteVersion: number | string;
+        };
+        QuoteCreateRequest: {
+            /** Format: uuid */
+            customerId: null | string;
+            /** Format: uuid */
+            salesChannelId: string;
+            items: components["schemas"]["QuoteItemRequest"][];
+            /** Format: int32 */
+            validityDaysOverride: null | number | string;
+        };
+        /** @enum {unknown} */
+        QuoteDiscountKind: "None" | "Percent" | "Amount";
+        /** @enum {unknown} */
+        QuoteFixedFeeApplication: "PerUnit" | "PerOrder";
+        QuoteItemAdditionalCostResponse: {
+            description: string;
+            /** Format: double */
+            amount: number | string;
+        };
+        QuoteItemCostSnapshotResponse: {
+            engineVersion: string;
+            /** Format: double */
+            materialCostBeforeWastage: number | string;
+            /** Format: double */
+            materialWastageCost: number | string;
+            /** Format: double */
+            materialsTotalCost: number | string;
+            /** Format: double */
+            laborMinutes: null | number | string;
+            /** Format: double */
+            laborHourlyRate: null | number | string;
+            laborRateSource: null | string;
+            /** Format: double */
+            laborCost: number | string;
+            /** Format: double */
+            machineMinutes: null | number | string;
+            /** Format: double */
+            machineHourlyRate: null | number | string;
+            /** Format: double */
+            machineCost: number | string;
+            /** Format: double */
+            additionalDirectCostsTotal: number | string;
+            /** Format: double */
+            totalEstimatedCost: number | string;
+            /** Format: int32 */
+            outputQuantity: number | string;
+            /** Format: double */
+            estimatedUnitCost: number | string;
+            materials: components["schemas"]["QuoteItemMaterialResponse"][];
+            additionalCosts: components["schemas"]["QuoteItemAdditionalCostResponse"][];
+        };
+        QuoteItemMaterialResponse: {
+            /** Format: uuid */
+            supplyId: string;
+            supplyCode: string;
+            supplyName: string;
+            /** Format: double */
+            enteredQuantity: number | string;
+            enteredUnit: string;
+            /** Format: double */
+            normalizedQuantityBaseUnit: number | string;
+            baseUnit: string;
+            /** Format: double */
+            wastagePercent: number | string;
+            /** Format: double */
+            effectiveQuantityBaseUnit: number | string;
+            costSource: string;
+            costPolicy: string;
+            /** Format: double */
+            unitCostBaseUnit: number | string;
+            /** Format: double */
+            costBeforeWastage: number | string;
+            /** Format: double */
+            wastageCost: number | string;
+            /** Format: double */
+            costAfterWastage: number | string;
+            /** Format: double */
+            currentStockBaseUnitAtIssue: number | string;
+            exceededCurrentStockAtIssue: boolean;
+        };
+        QuoteItemRequest: {
+            /** Format: uuid */
+            sourceQuoteItemId: null | string;
+            /** Format: uuid */
+            productId: null | string;
+            adHocDescription: null | string;
+            /** Format: double */
+            manualUnitCost: null | number | string;
+            /** Format: double */
+            quantity: number | string;
+            /** Format: double */
+            desiredMarginPercent: number | string;
+            /** Format: double */
+            manualPriceOverride: null | number | string;
+            discountKind: components["schemas"]["QuoteDiscountKind"];
+            /** Format: double */
+            discountValue: number | string;
+        };
+        QuoteItemResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: int32 */
+            lineNumber: number | string;
+            /** Format: uuid */
+            sourceQuoteItemId: null | string;
+            /** Format: uuid */
+            productId: null | string;
+            productNameSnapshot: string;
+            description: null | string;
+            /** Format: double */
+            quantity: number | string;
+            /** Format: double */
+            unitTotalCost: number | string;
+            costEngineVersion: string;
+            /** Format: double */
+            desiredMarginPercent: number | string;
+            /** Format: uuid */
+            salesChannelId: string;
+            /** Format: uuid */
+            feeRuleVersionId: null | string;
+            /** Format: double */
+            commissionPercent: number | string;
+            fixedFeeApplication: components["schemas"]["QuoteFixedFeeApplication"];
+            /** Format: double */
+            rawFixedFee: number | string;
+            /** Format: double */
+            allocatedOrderFee: number | string;
+            /** Format: double */
+            fixedFeePerUnit: number | string;
+            roundingPolicyApplied: string;
+            /** Format: double */
+            suggestedUnitPrice: number | string;
+            /** Format: double */
+            manualPriceOverride: null | number | string;
+            priceOverridden: boolean;
+            /** Format: double */
+            unitPrice: number | string;
+            discountKind: components["schemas"]["QuoteDiscountKind"];
+            /** Format: double */
+            discountValue: number | string;
+            /** Format: double */
+            discountAmount: number | string;
+            /** Format: double */
+            netUnitPrice: number | string;
+            /** Format: double */
+            lineTotalAmount: number | string;
+            /** Format: double */
+            lineCostAmount: number | string;
+            /** Format: double */
+            lineFeeAmount: number | string;
+            /** Format: double */
+            expectedProfitAmount: number | string;
+            /** Format: double */
+            effectiveMarginPercent: number | string;
+            costSnapshot: components["schemas"]["QuoteItemCostSnapshotResponse"];
+        };
+        QuoteListItemResponse: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            /** Format: uuid */
+            customerId: null | string;
+            currentStatus: components["schemas"]["QuoteRevisionStatus"];
+            /** Format: double */
+            currentTotalAmount: number | string;
+            commercialOutcome: string;
+            /** Format: int64 */
+            version: number | string;
+        };
+        QuoteListResponse: {
+            items: components["schemas"]["QuoteListItemResponse"][];
+            /** Format: int32 */
+            page: number | string;
+            /** Format: int32 */
+            pageSize: number | string;
+            /** Format: int32 */
+            total: number | string;
+        };
+        QuoteResponse: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            /** Format: uuid */
+            customerId: null | string;
+            /** Format: int64 */
+            version: number | string;
+            currentRevision: components["schemas"]["QuoteRevisionResponse"];
+            commercialOutcome: string;
+            hasEverWon: boolean;
+        };
+        QuoteReviseRequest: {
+            /** Format: uuid */
+            customerId: null | string;
+            /** Format: uuid */
+            salesChannelId: string;
+            items: components["schemas"]["QuoteItemRequest"][];
+            /** Format: int32 */
+            validityDaysOverride: null | number | string;
+            /** Format: int64 */
+            quoteVersion: number | string;
+        };
+        QuoteRevisionResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: int32 */
+            revisionIndex: number | string;
+            revisionSuffix: string;
+            displayNumber: string;
+            status: components["schemas"]["QuoteRevisionStatus"];
+            /** Format: uuid */
+            salesChannelId: string;
+            /** Format: date-time */
+            issuedAt: string;
+            /** Format: date */
+            validUntil: string;
+            /** Format: uuid */
+            supersededByRevisionId: null | string;
+            /** Format: uuid */
+            sourceRevisionId: null | string;
+            /** Format: date-time */
+            approvedAt: null | string;
+            /** Format: uuid */
+            approvedBy: null | string;
+            /** Format: double */
+            subtotalAmount: number | string;
+            /** Format: double */
+            discountAmount: number | string;
+            /** Format: double */
+            totalAmount: number | string;
+            /** Format: double */
+            totalCostAmount: number | string;
+            /** Format: double */
+            expectedProfitAmount: number | string;
+            /** Format: double */
+            effectiveMarginPercent: number | string;
+            items: components["schemas"]["QuoteItemResponse"][];
+        };
+        /** @enum {unknown} */
+        QuoteRevisionStatus: "GENERATED" | "SENT" | "NEGOTIATING" | "APPROVED" | "CANCELED" | "EXPIRED" | "SUPERSEDED";
+        QuoteVersionedRequest: {
+            /** Format: int64 */
+            quoteVersion: number | string;
         };
         RequeueOutboxMessageRequest: {
             reason: string;

@@ -108,8 +108,16 @@ public sealed class FeeRuleVersion : Entity, IOwnedBy<FeeRule>
         FeeRuleId = feeRuleId;
         if (commissionPercent < 0 || commissionPercent >= 1) throw new ArgumentException("PRICING_INVALID_COMMISSION");
         if (fixedFee < 0) throw new ArgumentException("FEE_RULE_VERSION_FIXED_FEE_INVALID");
+        // B-03: a fixed fee is a BRL amount, never more precise than whole cents — this rejects
+        // a NEW version's fee outright (e.g. 1.005) rather than silently rounding/truncating it,
+        // which the PER_ORDER allocator could otherwise never partition exactly. Existing,
+        // already-persisted legacy rows are never touched by this — the constructor only runs
+        // for a version being created now.
+        if (!Verce.SharedKernel.Rounding.HasMoneyPrecision(fixedFee)) throw new ArgumentException("FIXED_FEE_PRECISION_INVALID");
         if (minimumFee is < 0) throw new ArgumentException("FEE_RULE_VERSION_MINIMUM_FEE_INVALID");
+        if (minimumFee is { } minFeeValue && !Verce.SharedKernel.Rounding.HasMoneyPrecision(minFeeValue)) throw new ArgumentException("FIXED_FEE_PRECISION_INVALID");
         if (maximumFee is < 0) throw new ArgumentException("FEE_RULE_VERSION_MAXIMUM_FEE_INVALID");
+        if (maximumFee is { } maxFeeValue && !Verce.SharedKernel.Rounding.HasMoneyPrecision(maxFeeValue)) throw new ArgumentException("FIXED_FEE_PRECISION_INVALID");
         if (minimumFee is { } min && maximumFee is { } max && min > max) throw new ArgumentException("FEE_RULE_VERSION_FEE_RANGE_INVALID");
         if (!Enum.IsDefined(fixedFeeApplication)) throw new ArgumentException("FEE_RULE_VERSION_FIXED_FEE_APPLICATION_INVALID");
         ValidFrom = validFrom;

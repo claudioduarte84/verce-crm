@@ -16,6 +16,7 @@
     <Project Path="src/Modules/Verce.Modules.Pricing/Verce.Modules.Pricing.csproj" />
     <Project Path="src/Modules/Verce.Modules.Production/Verce.Modules.Production.csproj" />
     <Project Path="src/Modules/Verce.Modules.Quoting/Verce.Modules.Quoting.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Quoting.Contracts/Verce.Modules.Quoting.Contracts.csproj" />
     <Project Path="src/Modules/Verce.Modules.Reporting/Verce.Modules.Reporting.csproj" />
     <Project Path="src/Modules/Verce.Modules.Sales/Verce.Modules.Sales.csproj" />
     <Project Path="src/Modules/Verce.Modules.Settings/Verce.Modules.Settings.csproj" />
@@ -25,6 +26,8 @@
     <Project Path="tests/Verce.Catalog.Tests/Verce.Catalog.Tests.csproj" />
     <Project Path="tests/Verce.Costing.Tests/Verce.Costing.Tests.csproj" />
     <Project Path="tests/Verce.Pricing.Tests/Verce.Pricing.Tests.csproj" />
+    <Project Path="tests/Verce.Quoting.Tests/Verce.Quoting.Tests.csproj" />
+    <Project Path="tests/Verce.Production.Tests/Verce.Production.Tests.csproj" />
     <Project Path="tests/Verce.IntegrationTests/Verce.IntegrationTests.csproj" />
     <Project Path="tests/Verce.Platform.Tests.Fixtures.Cyclic/Verce.Platform.Tests.Fixtures.Cyclic.csproj" />
     <Project Path="tests/Verce.Platform.Tests.Fixtures.Orphan/Verce.Platform.Tests.Fixtures.Orphan.csproj" />

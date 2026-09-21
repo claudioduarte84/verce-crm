@@ -21,6 +21,9 @@ public static class Permissions
     public const string PricingRead = "pricing:read";
     public const string PricingCalculate = "pricing:calculate";
     public const string PricingManage = "pricing:manage";
+    public const string QuotingRead = "quoting:read";
+    public const string QuotingManage = "quoting:manage";
+    public const string ProductionRead = "production:read";
     public static void AddPolicies(Microsoft.AspNetCore.Authorization.AuthorizationOptions options)
     {
         options.AddPolicy(CustomersRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
@@ -38,5 +41,8 @@ public static class Permissions
         options.AddPolicy(PricingRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
         options.AddPolicy(PricingCalculate, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
         options.AddPolicy(PricingManage, p => p.RequireRole(Roles.Owner));
+        options.AddPolicy(QuotingRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
+        options.AddPolicy(QuotingManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
+        options.AddPolicy(ProductionRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
     }
 }

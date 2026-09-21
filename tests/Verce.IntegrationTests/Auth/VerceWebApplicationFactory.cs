@@ -74,6 +74,12 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
             ["ConnectionStrings:Verce"] = _connectionString,
             ["DataProtection:DevKeyDirectory"] = Path.Combine(Path.GetTempPath(), "verce-test-dp-" + Guid.NewGuid().ToString("N")),
             ["Outbox:SchedulingEnabled"] = "false",
+            // S6: ExpireQuotesJob is read the same eager way (AddVerceQuotingScheduling runs
+            // right after AddVercePlatform in Program.cs, before builder.Build()) — mirrors
+            // Outbox:SchedulingEnabled's default-off posture for the same reason: most tests in
+            // this project manipulate quote/revision status directly and must never race a live
+            // expiration sweep.
+            ["Quoting:Expiration:SchedulingEnabled"] = "false",
             ["Settings:SeedOnStartup"] = "false",
         };
         foreach (var (key, value) in _extraConfiguration) _settings[key] = value;

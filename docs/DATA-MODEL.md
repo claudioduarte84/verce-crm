@@ -679,108 +679,168 @@ DO UPDATE SET last_sequence = quote_number_counter.last_sequence + 1
 RETURNING last_sequence;
 ```
 
-### `quoting.quote`
-`id` **PK**, `number_date date not null`, `number_sequence int not null`,
-`number_text text not null` (`260906-4`, denormalized for search),
-`customer_id uuid null` (**FK** restrict), `current_revision_id uuid null` (deferrable **FK**).
+> **F-06 correction (2026-09-20).** The `quote`/`quote_revision` sections below previously
+> described an earlier architecture-phase sketch (`number_text`, a computed `display_number`
+> column, a single `customer_snapshot jsonb`, and a set of proposal-document fields — `notes`,
+> `title`, `scope`, `technical_highlights`, `payment_terms`, `delivery_terms`, `warranty`,
+> `calculation_engine_version` on the revision itself) that materially disagrees with the actually
+> shipped S6 migration/model. The tables below now document the REAL physical schema — the
+> migration (`20260920200219_AddS6QuotingAndProductionCore`) and the EF model are the source of
+> truth for naming/layout, [ADR-0020](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md)
+> remains the source of truth for semantics. The proposal-document fields never existed in S6;
+> a future document-rendering sprint that needs them would add its own snapshot table (mirroring
+> [ADR-0016](architecture/ADR-0016-document-render-snapshots.md)'s pattern), never retrofit them
+> onto `quote_revision`.
 
-- **U** `(number_date, number_sequence)`.
-- **U** `(number_text)`.
-- **IX** `(customer_id)`, `(number_date desc)`.
+### `quoting.quote`
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | **PK** (UUID v7 — identity only, never `ORDER BY id`) |
+| number | text(20) | not null (`260906-4`) |
+| number_date | date | not null (organization-timezone business date) |
+| number_sequence | int | not null |
+| customer_id | uuid | null — plain ID reference, no FK (CLAUDE.md rule 11) |
+| current_revision_id | uuid | not null — **FK** to `quote_revision.id`, `DEFERRABLE INITIALLY DEFERRED` (raw SQL; EF cannot express deferrable constraints, so left unmodeled in the fluent config) |
+| created_at / created_by / updated_at / updated_by | timestamptz / uuid | application metadata |
+| version | bigint | optimistic concurrency token (ADR-0011 §2) |
+
+- **U** `ix_quote_number` on `(number)`.
+- **U** `ix_quote_number_date_number_sequence` on `(number_date, number_sequence)`.
 
 ### `quoting.quote_revision`
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid | **PK** |
-| quote_id | uuid | **FK** cascade |
-| revision_index | int | not null **CHECK** `>= 1` |
-| revision_suffix | text | not null (`''`, `B`, `AA`) — persisted, not computed |
-| display_number | text | not null (`260906-4B`) |
-| status | text | not null **CHECK** enumerated (7 states) |
-| sales_channel_id | uuid | **FK** restrict |
+| quote_id | uuid | **FK** cascade to `quote.id` |
+| revision_index | int | not null **CHECK** `ck_quote_revision_index_positive` (`>= 1`) |
+| revision_suffix | text(8) | not null (`''`, `B`, `AA`) — persisted, not computed |
+| status | text(16) | not null **CHECK** `ck_quote_revision_status` (7 states) |
+| sales_channel_id | uuid | not null — plain ID reference, no FK |
 | issued_at | timestamptz | not null |
-| issued_date | date | not null (org tz) |
 | validity_days | int | not null |
 | valid_until | date | not null |
-| customer_snapshot | jsonb | not null |
+| customer_id | uuid | null — plain ID reference, no FK |
+| customer_name_snapshot | text(200) | null |
+| customer_document_snapshot | text(32) | null |
+| customer_contacts_snapshot | jsonb | null |
+| customer_addresses_snapshot | jsonb | null |
+| superseded_by_revision_id | uuid | null **FK** self, restrict |
+| source_revision_id | uuid | null **FK** self, restrict |
+| approved_at | timestamptz | null |
+| approved_by | uuid | null |
 | subtotal_amount | numeric(18,2) | not null |
 | discount_amount | numeric(18,2) | not null |
 | total_amount | numeric(18,2) | not null |
 | total_cost_amount | numeric(18,2) | not null |
 | expected_profit_amount | numeric(18,2) | not null |
 | effective_margin_percent | numeric(9,6) | not null |
-| notes | text | null (printed) |
-| internal_notes | text | null (**never printed** — absent from the binding catalogue) |
-| title | text | null — project/proposal title |
-| scope | text | null |
-| technical_highlights | jsonb | not null default `[]` — array of `{label, value}` |
-| technical_notes | text | null |
-| out_of_scope | text | null |
-| payment_terms | text | null — copied from settings at issue |
-| delivery_terms | text | null — copied from settings at issue |
-| warranty | text | null — copied from settings at issue |
-| source_revision_id | uuid | null **FK** self |
-| superseded_by_revision_id | uuid | null **FK** self |
-| calculation_engine_version | text | not null |
+| created_at / created_by / updated_at / updated_by | timestamptz / uuid | application metadata |
 
-- **U** `(quote_id, revision_index)`.
-- **U** `(display_number)`.
-- **IX** partial `(status, valid_until) WHERE superseded_by_revision_id IS NULL AND status IN
-  ('GENERATED','SENT','NEGOTIATING')` — the expiration job's covering index.
-- **IX** `(quote_id, revision_index desc)`, `(sales_channel_id)`, `(issued_date desc)`.
+The customer identity is frozen as SEPARATE scalar/jsonb snapshot columns (ADR-0003) — never a
+single combined `customer_snapshot jsonb`. There is no persisted `display_number`: it is computed
+at read time as `quote.number + revision.revision_suffix` ([`Quote.DisplayNumberFor`](../src/Modules/Verce.Modules.Quoting/Quote.cs)).
+
+- **U** `ix_quote_revision_quote_id_revision_index` on `(quote_id, revision_index)`.
+- **IX** `ix_quote_revision_expiration_eligible` — partial on `(valid_until)` filtered
+  `WHERE superseded_by_revision_id IS NULL AND status IN ('GENERATED','SENT','NEGOTIATING')` —
+  the expiration job's covering index (H-02).
+- **IX** `ix_quote_revision_source_revision_id`, `ix_quote_revision_superseded_by_revision_id`.
 
 ### `quoting.quote_item`
-`id` **PK**, `quote_revision_id` **FK** cascade, `line_number int`, `product_id uuid null`,
-`product_recipe_id uuid null`, `product_name_snapshot text not null`, `description text null`,
-`quantity numeric(14,4) not null CHECK > 0`,
-`unit_cost_amount numeric(18,6)`, `suggested_unit_price numeric(18,2)`,
-`unit_price numeric(18,2) not null CHECK > 0`, `price_overridden boolean not null default false`,
-`discount_kind text` **CHECK** (`NONE|PERCENT|AMOUNT`), `discount_value numeric(18,6)`,
-`discount_amount numeric(18,2)`, `net_unit_price numeric(18,2)`,
-`line_total_amount numeric(18,2)`, `line_cost_amount numeric(18,2)`,
-`line_fee_amount numeric(18,2)`, `desired_margin_percent numeric(9,6)`,
-`sales_channel_id uuid` **FK**, `expected_profit_amount numeric(18,2)`,
-`effective_margin_percent numeric(9,6)`, `sort_order int`.
+`id` **PK**, `quote_revision_id` **FK** cascade, `line_number int`,
+`source_quote_item_id uuid null` (provenance only, no FK — B-01: the client's only way to say
+"this is the same commercial line as R(n) item X"; null means a genuinely new line),
+`product_id uuid null`, `product_recipe_id uuid null`, `product_name_snapshot text not null`,
+`description text null`, `quantity numeric(14,4) not null CHECK > 0`,
+`unit_total_cost numeric(18,6) not null` (= `quote_item_cost_snapshot.estimated_unit_cost`,
+denormalized for cheap reads), `cost_engine_version text not null`,
+`desired_margin_percent numeric(9,6) not null`, `sales_channel_id uuid not null`
+(plain cross-module ID reference to Pricing `SalesChannel`; no database FK),
+`fee_rule_version_id uuid null` (reference only), `commission_percent numeric(9,6) not null`,
+`fixed_fee_application text not null` **CHECK** (`PerUnit|PerOrder`),
+`raw_fixed_fee numeric(18,6) not null`, `allocated_order_fee numeric(18,2) not null`,
+`fixed_fee_per_unit numeric(18,6) not null`, `rounding_policy_applied text not null`,
+`suggested_unit_price numeric(18,2) not null`, `commission_amount_per_unit numeric(18,2) not null`,
+`fee_clamp_applied text null` (`MIN`/`MAX`), `manual_price_override numeric(18,2) null`
+**CHECK** (null or `>= 0`), `price_overridden boolean not null`, `unit_price numeric(18,2) not null`,
+`discount_kind text not null` **CHECK** (`None|Percent|Amount`), `discount_value numeric(18,6) not null`,
+`discount_amount numeric(18,2) not null`, `net_unit_price numeric(18,2) not null`,
+`line_total_amount numeric(18,2) not null`, `line_cost_amount numeric(18,2) not null`,
+`line_fee_amount numeric(18,2) not null`, `expected_profit_amount numeric(18,2) not null`,
+`effective_margin_percent numeric(9,6) not null`.
 
 - **U** `(quote_revision_id, line_number)`.
-- **IX** `(product_id)`.
+- **IX** `(product_id)` (plain ID reference, no FK — see §16).
 
 ### `quoting.quote_item_cost_snapshot` — 1:1 with `quote_item`
+
+> **B-02 correction (2026-09-20).** An earlier S6 draft collapsed this to a scalar
+> `unit_total_cost`/`calculation_engine_version` pair directly on `quote_item`, deferring the
+> whole breakdown as "needs S9/S10 inputs." That was wrong: every field below is exactly what S4's
+> `CostEngine`/`ProductCostCalculator` already returns TODAY (materials with per-supply wastage
+> breakdown, labor, machine, additional direct costs) — none of it needs Energy (S10) or
+> per-machine costing (S9) inputs. Only a genuinely future concept (a real `energy_tariff_version_id`
+> reference, smart-plug metered energy, a `machine_id` FK to a real Machine aggregate) remains
+> deferred to those sprints; this table freezes everything CostEngine can compute right now, in
+> full, per ADR-0003.
+
 | Column | Type | Notes |
 |---|---|---|
-| quote_item_id | uuid | **PK**, **FK** cascade |
-| filament_cost | numeric(18,6) | not null |
-| supplies_cost | numeric(18,6) | not null |
-| packaging_cost | numeric(18,6) | not null |
-| manual_cost | numeric(18,6) | not null |
-| energy_kwh | numeric(12,4) | not null |
-| energy_price_per_kwh | numeric(18,6) | not null |
-| energy_cost | numeric(18,6) | not null |
-| energy_source | text | `ESTIMATED|ESTIMATED_OVERRIDE|MANUAL|SMART_PLUG` |
-| energy_tariff_version_id | uuid | null (reference only, value already frozen) |
-| machine_id | uuid | null |
-| machine_hours | numeric(12,6) | not null |
-| machine_hourly_rate | numeric(18,6) | not null |
-| machine_cost | numeric(18,6) | not null |
-| labor_minutes | int | not null |
-| labor_hourly_rate | numeric(18,6) | not null |
+| id | uuid | **PK** |
+| quote_item_id | uuid | **U**, **FK** cascade |
+| engine_version | text | not null (`CostCalculationResult.EngineVersion`) |
+| material_cost_before_wastage | numeric(18,6) | not null |
+| material_wastage_cost | numeric(18,6) | not null |
+| materials_total_cost | numeric(18,6) | not null |
+| labor_minutes | numeric(14,4) | null (recipe has no labor step) |
+| labor_hourly_rate | numeric(18,6) | null |
+| labor_rate_source | text | null (`RECIPE_OVERRIDE|SETTINGS_DEFAULT`) |
 | labor_cost | numeric(18,6) | not null |
-| direct_cost | numeric(18,6) | not null |
-| wastage_rate | numeric(9,6) | not null |
-| wastage_cost | numeric(18,6) | not null |
-| unit_total_cost | numeric(18,6) | not null |
-| commission_percent | numeric(9,6) | not null |
-| fixed_fee | numeric(18,2) | not null |
-| fixed_fee_application | text | not null |
-| fee_clamp_applied | text | null (`MIN`/`MAX`) |
-| fee_rule_version_id | uuid | null (reference only) |
-| price_rounding_policy | text | not null |
-| calculation_engine_version | text | not null |
-| breakdown | jsonb | not null — full explanation tree |
+| machine_minutes | numeric(14,4) | null (recipe has no machine step) |
+| machine_hourly_rate | numeric(18,6) | null |
+| machine_cost | numeric(18,6) | not null |
+| additional_direct_costs_total | numeric(18,6) | not null |
+| total_estimated_cost | numeric(18,6) | not null |
+| output_quantity | int | not null |
+| estimated_unit_cost | numeric(18,6) | not null — mirrored onto `quote_item.unit_total_cost` |
 
-**IX** `gin (breakdown jsonb_path_ops)` only if "explain" search is ever needed; not created in v1.
-The typed columns above carry every value reports need, so the JSONB is never queried in
-aggregate ([ADR-0003](architecture/ADR-0003-cost-and-price-snapshots.md)).
+### `quoting.quote_item_material_snapshot` — 1:N per `quote_item` (B-02)
+One row per recipe material line, frozen at issue exactly as `MaterialCostBreakdown` computed it —
+never re-resolved against the Supply's current cost/stock later.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | **PK** |
+| quote_item_id | uuid | **FK** cascade |
+| line_number | int | not null, **U** with `quote_item_id` (ordering) |
+| supply_id | uuid | not null (plain ID reference, no FK — CLAUDE.md rule 11) |
+| supply_code_snapshot | text | not null |
+| supply_name_snapshot | text | not null |
+| entered_quantity | numeric(18,8) | not null |
+| entered_unit | text | not null |
+| normalized_quantity_base_unit | numeric(14,4) | not null |
+| base_unit | text | not null |
+| wastage_percent | numeric(9,6) | not null |
+| effective_quantity_base_unit | numeric(14,4) | not null |
+| cost_source | text | not null (`WEIGHTED_AVERAGE_ACQUISITION|MANUAL_OVERRIDE|...`) |
+| cost_policy | text | not null |
+| unit_cost_base_unit | numeric(18,6) | not null |
+| cost_before_wastage | numeric(18,6) | not null |
+| wastage_cost | numeric(18,6) | not null |
+| cost_after_wastage | numeric(18,6) | not null |
+| current_stock_base_unit_at_issue | numeric(14,4) | not null |
+| exceeded_current_stock_at_issue | boolean | not null |
+
+### `quoting.quote_item_additional_cost_snapshot` — 1:N per `quote_item` (B-02)
+One row per recipe additional-cost line (e.g. packaging), frozen the same way.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | **PK** |
+| quote_item_id | uuid | **FK** cascade |
+| line_number | int | not null, **U** with `quote_item_id` |
+| description | text | not null |
+| amount | numeric(18,6) | not null |
 
 ### `quoting.quote_status_history` — append-only
 `id` **PK**, `quote_revision_id` **FK** cascade, `from_status text null`, `to_status text not null`,
@@ -797,18 +857,44 @@ aggregate ([ADR-0003](architecture/ADR-0003-cost-and-price-snapshots.md)).
 
 ## 10. `production` schema
 
-### `production.production_order`
-`id` **PK**, `order_number text` **U**, `number_date date`, `number_sequence int`,
-`quote_revision_id uuid not null` **U** ← *the idempotency key*, **FK** restrict,
-`customer_id uuid null`, `customer_name_snapshot text`, `status text` **CHECK** (6 states),
-`due_date date null`, `total_quantity numeric(14,4)`, `shipping_address_snapshot jsonb null`,
-`notes text null`, `has_pending_revision boolean not null default false`,
-`superseded_by_order_id uuid null` **FK** self, `cancellation_reason text null`,
-`started_at`, `completed_at`, `shipped_at`, `delivered_at` (all `timestamptz null`).
+> **S6/S9 split (ADR-0020 §A.8, 2026-09-20; naming corrected F-06).** Only
+> `production.production_order` is created by S6 — the minimum slice the `QuoteApproved`
+> transactional invariant needs (aggregate, full status enum, `QUEUED` creation,
+> `QUEUED → CANCELED` supersession, `has_pending_revision`). The table below is S6's REAL physical
+> schema (migration `20260920200219_AddS6QuotingAndProductionCore` + the EF model) — it carries
+> only identity, numbering, the two plain ID references (`quote_id`/`quote_revision_id`, never a
+> cross-module FK), status, the supersession pointer and application metadata. It has NO
+> `customer_id`, `customer_name_snapshot`, `due_date`, `total_quantity`,
+> `shipping_address_snapshot`, `notes`, or `started_at`/`completed_at`/`shipped_at`/`delivered_at`
+> columns — those, along with `production_order_item`, `production_order_item_planned_material`,
+> `production_order_item_actual_material` and `production_order_status_history` below, are S9's
+> still-unbuilt operational expansion of this same aggregate (the shop floor: items, planned/
+> actual material, printer/scheduling UX) — a **planned extension**, presented here as a sketch of
+> the target shape, never as though it already exists in the S6 table.
 
-- **U** `(quote_revision_id)` — guarantees at most one order per approved revision.
-- **IX** partial `(status, due_date) WHERE status IN ('QUEUED','IN_PRODUCTION')` — the queue view.
-- **U** `(number_date, number_sequence)`.
+### `production.production_order` — S6 current physical schema
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid | **PK** (UUID v7) |
+| order_number | text(20) | not null (`260920-1`) |
+| number_date | date | not null |
+| number_sequence | int | not null |
+| quote_id | uuid | not null — plain ID reference, no FK (same-quote lookup for the ADR-0020 §A.2 supersession matrix) |
+| quote_revision_id | uuid | not null — plain ID reference, no FK; **the idempotency key** |
+| status | text(16) | not null **CHECK** `ck_production_order_status` (6 states: `QUEUED\|IN_PRODUCTION\|READY\|SHIPPED\|DELIVERED\|CANCELED`) |
+| has_pending_revision | bool | not null — advisory only, never a guard (ADR-0020 §A.4) |
+| superseded_by_order_id | uuid | null **FK** self, restrict |
+| cancellation_reason | text(64) | null (e.g. `SUPERSEDED_BY_REVISION`) |
+| created_at / created_by / updated_at / updated_by | timestamptz / uuid | application metadata |
+| version | bigint | optimistic concurrency token |
+
+- **U** `ix_production_order_order_number` on `(order_number)`.
+- **U** `ix_production_order_quote_revision_id` on `(quote_revision_id)` — guarantees at most one order per approved revision; also the `ON CONFLICT` target for the idempotent creation insert (B-04).
+- **U** `ix_production_order_number_date_number_sequence` on `(number_date, number_sequence)`.
+- **IX** `ix_production_order_quote_id`, `ix_production_order_superseded_by_order_id`.
+- **IX** `ix_production_order_status_number_date` on `(status, number_date)`.
+
+### S9 planned extension (sketch — none of the following exist yet)
 
 ### `production.production_order_item`
 `id` **PK**, `production_order_id` **FK** cascade, `quote_item_id uuid null`,
@@ -1030,7 +1116,6 @@ and generate **no** EF navigation property (ARCHITECTURE §3.1).
 | `catalog.product_recipe.machine_id` | `energy.machine.id` |
 | `catalog.product.default_sales_channel_id` | `pricing.sales_channel.id` |
 | `quoting.quote.customer_id` | `customers.customer.id` |
-| `quoting.quote_revision.sales_channel_id` | `pricing.sales_channel.id` |
 | `quoting.quote_item.product_id` | `catalog.product.id` |
 | `production.production_order.quote_revision_id` | `quoting.quote_revision.id` |
 | `sales.sale.quote_revision_id` | `quoting.quote_revision.id` |
@@ -1038,6 +1123,13 @@ and generate **no** EF navigation property (ARCHITECTURE §3.1).
 | `energy.energy_consumption_session.production_order_item_id` | `production.production_order_item.id` |
 | `settings.branding_assignment.brand_asset_id` | `settings.brand_asset.id` |
 | `documents.generated_document.brand_asset_version_ids[]` | `settings.brand_asset_version.id` (array — **no declarative FK**, see note) |
+
+Logical cross-module reference (no physical FK):
+
+- `quoting.quote_revision.sales_channel_id` is a required UUID reference to Pricing `SalesChannel`.
+  Pricing owns `SalesChannel`; Quoting persists its identity as part of the immutable commercial
+  snapshot. No database FK is defined. Application/composition logic validates channel existence
+  and activity when constructing the snapshot.
 
 Deliberate exceptions:
 

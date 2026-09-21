@@ -151,6 +151,18 @@ independent-review blocking findings against the S6-entry package are resolved. 
 implementation may begin *after independent re-review of the corrected ADR-0020* — it does not
 mean S6 is implemented, and it does not close the S6/S9 implementation deadlines above.
 
+**S6 implementation deadline: MET (2026-09-20, post-correction).** `VERCE3D-S6-IMPLEMENTATION-MACRO-001`
+delivered the runtime for all three rows, and `VERCE3D-S6-POST-SOL-CORRECTION-MACRO-001` corrected
+five blocking findings an independent review raised against that delivery — most relevantly here,
+B-01 (true clone-candidate revision construction, replacing a full re-resolve) and B-02 (the
+`quote_item_cost_snapshot`/`quote_item_material_snapshot`/`quote_item_additional_cost_snapshot`
+tables freeze CostEngine's full breakdown, not a collapsed scalar). `ProductionOrder` (H-001),
+`PerOrderFeeAllocator` (H-004 remainder) and `QuoteOutcomeCalculator` (H-009 A/Option B) are all
+implemented, unit- and integration-tested against a real PostgreSQL instance, and proven end to
+end by a permanent `S5ToS6BootstrapUpgradeTests` upgrade certification. Remaining S9 scope (the
+operational shop floor: items, planned/actual material, printer/scheduling UX) is untouched and
+still owed by S9.
+
 Deliberately **not** decided here, and still owed by their own sprints: **H-002** (sale
 lifecycle, including whether more than one `Sale` may reference one approved revision),
 **H-003** (mixed-channel fees), **H-005** (override × discount × bracket precedence) — all S8 —

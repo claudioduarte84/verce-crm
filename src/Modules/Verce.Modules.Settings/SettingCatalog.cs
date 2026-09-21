@@ -75,6 +75,37 @@ public static class SettingCatalog
 
 public sealed class AppSettingValueReader(VerceDbContext db)
 {
+    public async Task<int> GetIntAsync(string key, CancellationToken cancellationToken)
+    {
+        var definition = SettingCatalog.GetRequired(key);
+        if (definition.ValueType != AppSettingValueType.Int) throw new ArgumentException("SETTING_TYPE_INVALID");
+        var tracked = db.Set<AppSetting>().Local.SingleOrDefault(item => item.Key == definition.Key);
+        var value = tracked?.Value ?? await db.Set<AppSetting>().AsNoTracking()
+            .Where(item => item.Key == definition.Key)
+            .Select(item => item.Value)
+            .SingleOrDefaultAsync(cancellationToken) ?? definition.DefaultValue;
+        var normalized = SettingCatalog.Validate(definition.Key, value, definition.ValueType);
+        if (!long.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+            throw new InvalidOperationException("SETTING_VALUE_INVALID");
+        // M-03: an out-of-int-range stored value must surface as a stable, catchable domain error
+        // — never an unhandled OverflowException reaching the caller as a generic 500.
+        if (parsed < int.MinValue || parsed > int.MaxValue) throw new ArgumentException("SETTING_VALUE_OUT_OF_RANGE");
+        return (int)parsed;
+    }
+
+    public async Task<bool> GetBoolAsync(string key, CancellationToken cancellationToken)
+    {
+        var definition = SettingCatalog.GetRequired(key);
+        if (definition.ValueType != AppSettingValueType.Bool) throw new ArgumentException("SETTING_TYPE_INVALID");
+        var tracked = db.Set<AppSetting>().Local.SingleOrDefault(item => item.Key == definition.Key);
+        var value = tracked?.Value ?? await db.Set<AppSetting>().AsNoTracking()
+            .Where(item => item.Key == definition.Key)
+            .Select(item => item.Value)
+            .SingleOrDefaultAsync(cancellationToken) ?? definition.DefaultValue;
+        var normalized = SettingCatalog.Validate(definition.Key, value, definition.ValueType);
+        return bool.Parse(normalized);
+    }
+
     public async Task<decimal> GetDecimalAsync(string key, CancellationToken cancellationToken)
     {
         var definition = SettingCatalog.GetRequired(key);

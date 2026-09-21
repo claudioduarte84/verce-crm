@@ -22,12 +22,25 @@ public sealed class PricingSeedService(IServiceScopeFactory scopes, IConfigurati
     public const string DirectChannelCode = SalesChannel.DirectChannelCode;
     private static readonly DateOnly SeedValidFrom = new(2020, 1, 1);
 
+    /// <summary>
+    /// H-03: this service depends on exactly ONE migration — the one that creates
+    /// <c>pricing.sales_channel</c>/<c>pricing.fee_rule</c>/<c>pricing.fee_rule_version</c>.
+    /// A blanket "zero pending migrations" check is wrong: a binary that ships a LATER, unrelated
+    /// migration (e.g. S6's Quoting/Production schema) would see that later migration as
+    /// "pending" against an S5-terminal database and wrongly refuse to seed Pricing data, even
+    /// though every table this service touches already exists. Checking for THIS migration by
+    /// name in the applied set is schema-aware — it seeds as soon as its own dependency is
+    /// satisfied, regardless of what else the running binary's model happens to know about.
+    /// </summary>
+    private const string RequiredMigrationId = "20260919152506_AddS5ProductsRecipesAndPricing";
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         if (!bool.TryParse(configuration["Settings:SeedOnStartup"], out var seedOnStartup) || !seedOnStartup) return;
         using var scope = scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<VerceDbContext>();
-        if ((await db.Database.GetPendingMigrationsAsync(cancellationToken)).Any()) return;
+        var applied = await db.Database.GetAppliedMigrationsAsync(cancellationToken);
+        if (!applied.Contains(RequiredMigrationId)) return;
 
         var direct = await db.Set<SalesChannel>().SingleOrDefaultAsync(x => x.Code == DirectChannelCode, cancellationToken);
         if (direct is null)

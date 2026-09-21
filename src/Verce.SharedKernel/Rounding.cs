@@ -52,4 +52,14 @@ public static class Rounding
 
     /// <summary>Rounds to an arbitrary scale using the system-wide rounding mode.</summary>
     public static decimal ToScale(decimal value, int scale) => Math.Round(value, scale, Mode);
+
+    /// <summary>
+    /// True iff <paramref name="value"/> has no more than <see cref="MoneyScale"/> (2) significant
+    /// fractional digits — i.e. it is already a whole number of cents (B-03: a PER_ORDER fixed
+    /// fee is a BRL amount partitioned in cents, so a fee with a third fractional digit, e.g.
+    /// <c>1.005</c>, can never be exactly partitioned and must be REJECTED, never silently
+    /// rounded/truncated/coerced). Trailing-zero scale differences never matter here: decimal
+    /// equality compares value, not representation, so <c>1.0m == 1.00m</c> is true.
+    /// </summary>
+    public static bool HasMoneyPrecision(decimal value) => value == Math.Round(value, MoneyScale, Mode);
 }

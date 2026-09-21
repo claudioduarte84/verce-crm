@@ -9,6 +9,17 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Verce.SharedKernel\Verce.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\Verce.Platform\Verce.Platform.csproj" />
+    <!-- ADR-0012 §1 / DOMAIN-MODEL §15: QuoteApproved et al. are the explicit, designed
+         cross-module event contract (CLAUDE.md rule 11's "*.Contracts interfaces"). Production
+         references ONLY the Contracts project — never Verce.Modules.Quoting itself, which owns
+         Quote/QuoteRevision/QuoteItem and must stay unreferenced (enforced by
+         ProductionArchitectureTests). -->
+    <ProjectReference Include="..\Verce.Modules.Quoting.Contracts\Verce.Modules.Quoting.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.11" />
   </ItemGroup>
 
 </Project>
