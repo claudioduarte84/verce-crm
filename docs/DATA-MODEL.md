@@ -611,13 +611,14 @@ twice (two parts, two notes).
 | commission_percent | numeric(9,6) | not null **CHECK** `>= 0 AND < 1` |
 | fixed_fee | numeric(18,2) | not null **CHECK** `>= 0` |
 | fixed_fee_application | text | **CHECK** `PER_UNIT` / `PER_ORDER`, default `PER_UNIT` |
-| minimum_fee | numeric(18,2) | null |
-| maximum_fee | numeric(18,2) | null |
+| minimum_fee | numeric(18,6) | null |
+| maximum_fee | numeric(18,6) | null |
 | shipping_component | numeric(18,2) | null (reserved) |
 | notes | text | null |
 
 - **EXCLUDE USING gist** `(fee_rule_id WITH =, daterange(valid_from, valid_until, '[)') WITH &&)`.
-- **CHECK** `minimum_fee IS NULL OR maximum_fee IS NULL OR minimum_fee <= maximum_fee`.
+- `minimum_fee <= maximum_fee` when both are present is enforced by the `FeeRuleVersion` domain
+  constructor; the shipped database has no corresponding SQL `CHECK`.
 
 ### `pricing.price_bracket`
 `id` **PK**, `fee_rule_version_id` **FK** cascade, `min_price numeric(18,2) not null`,
@@ -789,7 +790,9 @@ denormalized for cheap reads), `cost_engine_version text not null`,
 `raw_fixed_fee numeric(18,6) not null`, `allocated_order_fee numeric(18,2) not null`,
 `fixed_fee_per_unit numeric(18,6) not null`, `rounding_policy_applied text not null`,
 `suggested_unit_price numeric(18,2) not null`, `commission_amount_per_unit numeric(18,2) not null`,
-`fee_clamp_applied text null` (`MIN`/`MAX`), `manual_price_override numeric(18,2) null`
+`fee_clamp_applied text null` (`MIN`/`MAX`), `bracket_id uuid null`,
+`bracket_resolution text null` (`CONSISTENCY_SEARCH|PRICE_CONTAINMENT|VERSION_FLAT|BOUNDARY_PINNED`),
+`fee_basis_amount numeric(18,2) null`, `manual_price_override numeric(18,2) null`
 **CHECK** (null or `>= 0`), `price_overridden boolean not null`, `unit_price numeric(18,2) not null`,
 `discount_kind text not null` **CHECK** (`None|Percent|Amount`), `discount_value numeric(18,6) not null`,
 `discount_amount numeric(18,2) not null`, `net_unit_price numeric(18,2) not null`,
@@ -965,17 +968,30 @@ Same shape as `quote_status_history`, keyed by `production_order_id`.
 ## 11. `sales` schema
 
 ### `sales.sale`
-`id` **PK**, `sale_number text` **U**, `customer_id uuid null`, `sales_channel_id uuid` **FK**,
-`quote_revision_id uuid null` **U** (nullable-unique: one sale per revision at most),
+> **S8A target (not shipped).** Cross-module identities below are plain UUIDs, never physical
+> FKs. The target migration is `AddS8ASalesAndExpenses`.
+
+`id` **PK**, `sale_number text` **U**, `customer_id uuid null`, `customer_name_snapshot text`,
+`sales_channel_id uuid`, `quote_revision_id uuid null`, `conversion_request_id uuid null` **U**,
+`source text` **CHECK** (`QUOTE_CONVERSION|MANUAL_ENTRY|MARKETPLACE_ORDER`),
+`marketplace_account_id uuid null`, `external_order_id text null`,
+`fee_source text` **CHECK** (`LOCAL_RULE|PROVIDER_REPORTED`),
 `sold_at timestamptz`, `sold_date date`, `status text` **CHECK** (`CONFIRMED|CANCELED`),
 `gross_amount numeric(18,2)`, `discount_amount numeric(18,2)`, `net_amount numeric(18,2)`,
 `channel_fee_amount numeric(18,2)`, `shipping_amount numeric(18,2)`,
 `total_cost_amount numeric(18,2)`, `gross_profit_amount numeric(18,2)`,
 `effective_margin_percent numeric(9,6)`, `cost_basis text` **CHECK** (`ESTIMATED|ACTUAL|MIXED`),
-`external_order_code text null`, `notes`.
+`notes`.
 
 - **IX** partial `(sold_date desc) WHERE status = 'CONFIRMED'` — every revenue report.
 - **IX** `(sales_channel_id, sold_date)`, `(customer_id)`.
+- **U** `(quote_revision_id) WHERE quote_revision_id IS NOT NULL AND status <> 'CANCELED'`.
+- **U** `(marketplace_account_id, external_order_id)` — ordinary composite uniqueness, unfiltered
+  by Sale status. PostgreSQL permits repeated all-null tuples for non-marketplace sales; source
+  constraints require both values for marketplace sales, and cancellation never frees identity.
+- Source constraint: `QUOTE_CONVERSION` requires quote identity and forbids marketplace identity;
+  `MANUAL_ENTRY` forbids marketplace external identity; `MARKETPLACE_ORDER` requires both
+  marketplace fields and forbids quote identity. `source` is explicit, never inferred from nulls.
 
 `cost_basis` records whether `total_cost_amount` is still the quote estimate or has been
 reconciled with actual consumption ([ADR-0006](architecture/ADR-0006-estimated-vs-actual-cost.md)).
@@ -988,6 +1004,11 @@ reconciled with actual consumption ([ADR-0006](architecture/ADR-0006-estimated-v
 `channel_fee_amount numeric(18,2)`, `gross_profit_amount numeric(18,2)`,
 `quote_item_id uuid null`.
 **IX** `(product_id)`, **U** `(sale_id, line_number)`.
+
+### `sales.sale_status_history` — S8A target
+`id` **PK**, `sale_id uuid` (same-module FK cascade), `from_status text null`, `to_status text`
+**CHECK** (`CONFIRMED|CANCELED`), `changed_at timestamptz`, `changed_by uuid null`,
+`reason text null`. Cancellation requires the reason; business history complements generic audit.
 
 ---
 
@@ -1010,18 +1031,15 @@ reconciled with actual consumption ([ADR-0006](architecture/ADR-0006-estimated-v
 | supplier_name | text | null |
 | document_number | text | null |
 | accounting_treatment | text | not null **CHECK** (3 values) |
-| filament_lot_id | uuid | null **FK** |
-| supply_lot_id | uuid | null **FK** |
+| inventory_movement_id | uuid | null — plain UUID to PurchaseReceipt InventoryMovement |
+| sales_channel_id | uuid | null — channel attribution only |
 | machine_id | uuid | null |
 | attachment_path | text | null |
 | notes | text | null |
 
 **The double-counting guards** ([ADR-0013](architecture/ADR-0013-expense-inventory-double-counting.md)):
-- **U** `(filament_lot_id)` where not null — one lot, at most one expense.
-- **U** `(supply_lot_id)` where not null.
-- **CHECK** `NOT (filament_lot_id IS NOT NULL AND supply_lot_id IS NOT NULL)`.
-- **CHECK** `(filament_lot_id IS NOT NULL OR supply_lot_id IS NOT NULL)
-  → accounting_treatment = 'INVENTORY_PURCHASE'`.
+- **U** `(inventory_movement_id) WHERE inventory_movement_id IS NOT NULL`.
+- **CHECK** `inventory_movement_id IS NOT NULL → accounting_treatment = 'INVENTORY_PURCHASE'`.
 - **IX** partial `(incurred_on desc) WHERE accounting_treatment = 'OPERATING_EXPENSE'` — the
   dashboard's cost query.
 
@@ -1165,15 +1183,11 @@ and generate **no** EF navigation property (ARCHITECTURE §3.1).
 
 | From | To |
 |---|---|
-| `catalog.product_filament_component.filament_id` | `inventory.filament.id` |
-| `catalog.product_supply_component.supply_id` | `inventory.supply.id` |
 | `catalog.product_recipe.machine_id` | `energy.machine.id` |
 | `catalog.product.default_sales_channel_id` | `pricing.sales_channel.id` |
 | `quoting.quote.customer_id` | `customers.customer.id` |
 | `quoting.quote_item.product_id` | `catalog.product.id` |
 | `production.production_order.quote_revision_id` | `quoting.quote_revision.id` |
-| `sales.sale.quote_revision_id` | `quoting.quote_revision.id` |
-| `finance.expense.filament_lot_id` | `inventory.filament_lot.id` |
 | `energy.energy_consumption_session.production_order_item_id` | `production.production_order_item.id` |
 | `settings.branding_assignment.brand_asset_id` | `settings.brand_asset.id` |
 | `documents.generated_document.brand_asset_version_ids[]` | `settings.brand_asset_version.id` (array — **no declarative FK**, see note) |
@@ -1184,6 +1198,12 @@ Logical cross-module reference (no physical FK):
   Pricing owns `SalesChannel`; Quoting persists its identity as part of the immutable commercial
   snapshot. No database FK is defined. Application/composition logic validates channel existence
   and activity when constructing the snapshot.
+- `sales.sale.quote_revision_id` is a nullable plain UUID reference to Quoting `QuoteRevision`;
+  Sales defines no physical cross-module FK.
+- `sales.sale.marketplace_account_id` is a nullable plain UUID reserved for the future Commerce
+  account; Sales defines no physical cross-module FK.
+- `finance.expense.inventory_movement_id` is a nullable plain UUID reference to Inventory's
+  PurchaseReceipt `InventoryMovement`; Finance defines no physical cross-module FK.
 
 Deliberate exceptions:
 

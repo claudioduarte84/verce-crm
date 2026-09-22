@@ -223,7 +223,10 @@ See [ADR-0019 §2](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md
 
 ---
 
-## 5. Energy module
+## 5. Energy module — future S10
+
+Before S10 this module is a stub: CostEngine has no energy component and no default tariff is
+seeded. Energy input/cost is unavailable/absent, never represented as zero.
 
 ### Machine (AR)
 `Id`, `Name`, `Model?`, `SerialNumber?`, `NominalPowerWatts: int`,
@@ -263,8 +266,8 @@ public sealed record EnergyMeasurement(
     Kwh Kwh, EnergySourceKind Source, decimal Confidence, string? RawPayload);
 ```
 
-Implementations: `EstimatedEnergyProvider` (power × time, S4), `ManualEnergyProvider`
-(operator types the kWh, S10), `SmartPlugEnergyProvider` (S10+, device not chosen — **no
+Implementations from S10: `EstimatedEnergyProvider` (power × time), `ManualEnergyProvider`
+(operator types the kWh), `SmartPlugEnergyProvider` (S10+, device not chosen — **no
 vendor-specific code may be written before the device is selected**). Registration is by
 `Kind`; the resolver picks the provider configured per machine, falling back to estimated.
 
@@ -443,7 +446,8 @@ Invariants (the heart of the product):
 `ProductNameSnapshot`, `Description?`, `Quantity`, `UnitCostAmount`, `SuggestedUnitPrice`,
 `UnitPrice` (final, possibly overridden), `DiscountKind {NONE, PERCENT, AMOUNT}`,
 `DiscountValue`, `DiscountAmount`, `LineTotalAmount`, `DesiredMarginPercent`,
-`SalesChannelId` (item-level channel override; defaults to the revision channel),
+`SalesChannelId` (must equal the revision channel in S8A; mixed-channel revisions fail
+`QUOTE_MIXED_CHANNEL_NOT_SUPPORTED`),
 `ExpectedProfitAmount`, `EffectiveMarginPercent`, `SortOrder`.
 
 An item may be **ad-hoc** (no `ProductId`): a free description plus a manual cost. The
@@ -483,7 +487,9 @@ See [ADR-0004](architecture/ADR-0004-quote-numbering-and-revisioning.md).
 ## 9. Sales module
 
 ### Sale (AR)
-`Id`, `SaleNumber`, `CustomerId?`, `SalesChannelId`, `QuoteRevisionId?`, `SoldAt`,
+`Id`, `SaleNumber`, `CustomerId?`, `CustomerNameSnapshot`, `SalesChannelId`, `QuoteRevisionId?`,
+`ConversionRequestId?`, `Source {QUOTE_CONVERSION, MANUAL_ENTRY, MARKETPLACE_ORDER}`,
+`MarketplaceAccountId?`, `ExternalOrderId?`, `FeeSource {LOCAL_RULE, PROVIDER_REPORTED}`, `SoldAt`,
 `Status {CONFIRMED, CANCELED}`, `GrossAmount`, `DiscountAmount`, `NetAmount`,
 `ChannelFeeAmount`, `ShippingAmount`, `TotalCostAmount`, `GrossProfitAmount`,
 `EffectiveMarginPercent`, `ExternalOrderCode?`, `Notes?`.
@@ -492,6 +498,11 @@ See [ADR-0004](architecture/ADR-0004-quote-numbering-and-revisioning.md).
 `Id`, `SaleId`, `LineNumber`, `ProductId?`, `ProductNameSnapshot`, `Quantity`, `UnitPrice`,
 `DiscountAmount`, `LineTotalAmount`, `UnitCostAmount`, `LineCostAmount`,
 `ChannelFeeAmount`, `GrossProfitAmount`, `QuoteItemId?`.
+
+### SaleStatusHistory (*E*)
+Append-only entity owned by Sale: `SaleId`, `FromStatus?`, `ToStatus`, `Reason?`, `ChangedAt`,
+`ChangedBy?`. Creation appends the initial `CONFIRMED` entry. Cancellation appends
+`CONFIRMED -> CANCELED` with a nonblank reason, actor and timestamp; history is never rewritten.
 
 ### Quote versus Sale — the boundary
 
@@ -504,9 +515,10 @@ See [ADR-0004](architecture/ADR-0004-quote-numbering-and-revisioning.md).
 | Cost figure | Estimated, snapshotted | Best-known cost: actual when reconciled, else the snapshot |
 | Reports | Conversion, pipeline | Revenue, profit, margin |
 
-A sale created from an approved quote revision **copies the priced lines** (they are already
-frozen) and **references** the revision. It does not re-run pricing. A sale may also be
-created standalone (a walk-in sale with no quote) — the same table, `QuoteRevisionId` null.
+A Sale is created only by an explicit operator command from an `APPROVED` revision; approval
+creates ProductionOrder, not Sale. Conversion copies priced lines/totals and never reruns pricing;
+at most one non-canceled Sale references a revision. A standalone `MANUAL_ENTRY` may occur on
+DIRECT or a marketplace channel and freezes an available authorized cost basis.
 
 Duplication is bounded and intentional: a quote is a statement made then; a sale is money
 recognized now. Aggregating revenue from `quote_item` would be wrong (quotes that never
@@ -537,9 +549,9 @@ Plus, for the shop floor and for reconciliation:
 - `ProductionOrderItemPlannedMaterial` (*E*) — the exploded, snapshotted BOM: filament
   components with grams and color, supplies with quantities. Copied from the quote snapshot so
   the shop-floor document is correct even if the recipe changes tomorrow.
-- `ProductionOrderItemActualMaterial` (*E*) — what was actually consumed:
-  `MaterialKind`, `MaterialId`, `ActualQuantity`, `UnitCostAtConsumption`, `RecordedAt`,
-  `RecordedBy`. Recording emits `StockMovement(OUT)`.
+- `ProductionOrderItemActualMaterial` (*E*) — S9 physical fact: `MaterialKind`, `MaterialId`,
+  `ActualQuantity`, `RecordedAt`, `RecordedBy`, correction acknowledgement/reason and the atomic
+  `InventoryMovement(Consumption)` identity. S11 later values this fact; it does not post stock.
 - Actual energy comes from `EnergyConsumptionSession.ProductionOrderItemId`.
 
 **Snapshot policy here:** copy what the shop floor must read without joins to mutable master
@@ -570,7 +582,8 @@ even briefly — violates the invariant.
 `Id`, `ExpenseCategoryId`, `Description`, `Amount: Money`, `IncurredOn: DateOnly`,
 `PaidOn: DateOnly?`, `PaymentMethod?`, `SupplierName?`, `DocumentNumber?`,
 `AccountingTreatment {OPERATING_EXPENSE, INVENTORY_PURCHASE, ASSET_ACQUISITION}`,
-`FilamentLotId?`, `SupplyLotId?`, `MachineId?`, `Notes?`, `AttachmentPath?`.
+`InventoryMovementId?` (plain UUID to PurchaseReceipt), `SalesChannelId?`, `MachineId?`, `Notes?`,
+`AttachmentPath?`.
 
 ### ExpenseCategory (AR)
 `Id`, `Name`, `DefaultTreatment`, `IsActive`.
@@ -586,15 +599,14 @@ Rule:
 
 1. Expenses whose treatment is `INVENTORY_PURCHASE` are **excluded from the operational
    result**. They reach the result through consumption (material cost of items sold).
-2. Registering a `FilamentLot` or `SupplyLot` may create the linked `Expense` automatically
-   (treatment forced to `INVENTORY_PURCHASE`). A lot has **at most one** expense
-   (`unique(filament_lot_id)`, `unique(supply_lot_id)` on `expense`), so the same purchase can
-   never be entered twice through the two doors.
+2. A PurchaseReceipt InventoryMovement may create one linked `Expense` (treatment forced to
+   `INVENTORY_PURCHASE`). The plain UUID link is unique, so the same purchase cannot be entered
+   twice through the two doors.
 3. Expenses whose treatment is `ASSET_ACQUISITION` (a printer) are excluded from the
    operational result too; they reach it through `MachineHourlyRate` depreciation.
 4. Only `OPERATING_EXPENSE` rows enter "Custos/Despesas do mês" in the dashboard.
-5. Energy is the sharp edge: if the electricity bill is registered as an `OPERATING_EXPENSE`
-   **and** energy cost is inside product cost, the profit report double counts. The resolution
+5. From S10, energy is the sharp edge: if the electricity bill is registered as an
+   `OPERATING_EXPENSE` **and** energy cost is inside product cost, the profit report double counts. The resolution
    is stated in [ADR-0013](architecture/ADR-0013-expense-inventory-double-counting.md): the
    utility bill is registered as `OPERATING_EXPENSE` and the **Cash Result** report shows it,
    while the **Product Margin** report uses the per-item energy cost. The two reports are
@@ -734,8 +746,8 @@ Initial keys:
 | `pricing.margin_warning_denominator` | `0.10` | Pricing |
 | `costing.default_labor_hourly_rate` | `0.00` | Costing |
 | `costing.default_wastage_rate` | `0.00` percentage points (0–100) | Costing |
-| `energy.default_tariff_id` | seeded | Energy |
-| `energy.overhead_factor` | `0.00` | Energy |
+| `energy.default_tariff_id` | introduced and seeded in S10 | Energy |
+| `energy.overhead_factor` | introduced in S10 | Energy |
 | `ui.default_theme` | `verce-default` | Frontend |
 | `branding.product_name` | `VERCE 3D` | Frontend, documents |
 | `branding.product_subtitle` | `Laboratório de Custos` | Frontend |
@@ -770,7 +782,7 @@ never their own, and may not perform I/O
 | `FilamentLotRegistered` | Inventory | Inventory, Finance | stock IN; optional expense |
 | `ProductionOrderCreated` | Production | Production | initial status history |
 | `ProductionStarted` / `ProductionCompleted` | Production | Production | timestamps, status history |
-| `ActualMaterialRecorded` | Production | Inventory | stock OUT movement |
+| `ActualMaterialRecorded` | Production | Inventory | `InventoryMovement(Consumption)` |
 | `SaleCreated` | Sales | — | (reporting reads directly) |
 
 **Integration events** (`IIntegrationEvent`) — written to the outbox in the same transaction,
@@ -806,8 +818,8 @@ aggregates.
 7. Fee rule versions never overlap in time for the same rule.
 8. Energy tariff versions never overlap in time for the same tariff.
 9. One production order per approved quote revision, at most.
-10. A lot purchase produces at most one expense row.
-11. Stock movements are append-only.
+10. A PurchaseReceipt `InventoryMovement` produces at most one expense row.
+11. Inventory movements are append-only.
 12. The AI API key is never in a response, a log, or a plaintext column.
 13. A `GeneratedDocument` with `Purpose = ISSUED` is never updated or deleted; re-rendering
     inserts a new row.

@@ -356,7 +356,7 @@ synchronously ([DOMAIN-MODEL §15](DOMAIN-MODEL.md#15-domain-events)).
 Recorded actual consumption is an **immutable physical fact**. Canceling an order — whether by
 the operator or by supersession — never reverses it, never deletes it and never re-points it:
 
-- `production_order_item_actual_material` rows and the `StockMovement(OUT)` they emitted stand
+- `production_order_item_actual_material` rows and the `InventoryMovement(Consumption)` they emitted stand
   permanently; the ledger is append-only ([ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md))
   and `unit_cost_at_consumption` was frozen at consumption time
   ([ADR-0006 §2](architecture/ADR-0006-estimated-vs-actual-cost.md)). Material really left the
@@ -498,7 +498,10 @@ DRAFT ──publish──► PUBLISHED ──archive──► ARCHIVED
 CONFIRMED ──cancel──► CANCELED
 ```
 Sales are financial facts; they are canceled, never deleted, and a canceled sale is excluded
-from every revenue and profit metric while remaining visible in listings.
+from every revenue and profit metric while remaining visible in listings. Cancellation requires a
+nonblank reason, actor, timestamp, status history and audit; it does not mutate ProductionOrder.
+Only an `APPROVED` QuoteRevision is explicitly sale-eligible. Supersession does not change an
+approved revision's eligibility, and approval itself never creates a Sale.
 
 ### 5.4 AI insight run
 

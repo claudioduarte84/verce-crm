@@ -11,12 +11,11 @@ as information rather than as requests to reorder:
    depends on. S4 must ship the engine and the Laboratory against ad-hoc components, and S5
    then supplies the engine with data resolved from a real BOM. If S4 were built after S5 it
    would almost certainly grow database access.
-2. **S10 (Energy) after S6–S9 (Quote/Sales/Production).** Energy is part of the cost formula
-   from S4 onward. The resolution is that S4 ships energy **as a value in `CostInput`** (a kWh
-   number and a price per kWh, typed by the operator or estimated from machine power), while
-   S10 ships tariff versioning, sessions and the smart-plug provider. Sprints before S10 must
-   therefore not hard-code an energy price: they read the seeded default tariff. This is a
-   sequencing constraint on S4, not a reordering request.
+2. **S10 (Energy) after S6–S9 (Quote/Sales/Production).** The current CostEngine has no energy
+   component, the Energy module is a stub, and no seeded tariff exists. Until S10, energy input
+   and cost are **unavailable**, not zero: no price, cost breakdown or margin explanation may
+   imply `R$ 0` merely because the capability has not yet shipped. S10 introduces the complete
+   Energy model and integration without retroactively changing earlier immutable snapshots.
 
 ---
 
@@ -435,23 +434,38 @@ changing the company phone and replacing the logo leaves an already-issued propo
 
 ---
 
-## S8 — Sales & Expenses
+## S8A — Sales, Expenses & Pricing Decisions
 
-- `Sale` / `SaleItem`, creation from an approved revision (copying frozen lines) and
-  standalone; cancellation; `cost_basis = ESTIMATED` initially.
+- Explicit approved `QuoteRevision -> Sale` conversion (approval creates ProductionOrder, never
+  Sale), standalone/manual sales, immutable copied snapshots, cancellation and `ESTIMATED` cost.
+- `Sale.source` is `QUOTE_CONVERSION|MANUAL_ENTRY|MARKETPLACE_ORDER`; S8A adds only the future
+  marketplace identity/fee-source seam, not Commerce or provider integration.
 - `Expense` / `ExpenseCategory` with `AccountingTreatment` and the double-counting constraints
   ([ADR-0013](architecture/ADR-0013-expense-inventory-double-counting.md)).
-- Lot purchase → optional linked expense (`INVENTORY_PURCHASE`), enforced one-to-one.
-- Price brackets and `MinimumFee`/`MaximumFee` activated in the resolver.
+- PurchaseReceipt → optional linked `INVENTORY_PURCHASE` expense, enforced one-to-one.
+- PriceBracket activation, override/discount precedence and netUnitPrice fee basis. MinimumFee and
+  MaximumFee are already active from S5.
+- **Does not include Commerce, ChannelOffer, listing publication or marketplace order ingestion.**
 - UI: sales list, expense list with treatment badges and an explicit warning when an operator
   categorizes a material purchase as an operating expense.
+- PurchaseReceipt UX aids over the existing S3 ledger, without a new domain model: package input
+  computes `packages * unitsPerPackage -> quantity` with total cost, while filament/spool input
+  computes `roll count * editable spool weight -> entered quantity` with total cost.
 
-**Exit:** registering a filament purchase twice (through the lot screen and the expense screen)
-is impossible; the monthly cost figure excludes inventory purchases.
+**Exit:** registering a Supply purchase twice (through PurchaseReceipt and Expense) is impossible;
+the monthly cost figure excludes inventory purchases.
 
 ---
 
-## S9 — Production & Labels
+### S8B / S8C — future Commerce boundary
+
+S8B introduces Commerce and persistent `ChannelOffer` (including DIRECT participation) plus
+listing publication. S8C adds operational marketplace-order ingestion into canonical Sales.
+Provider analytics remain S12 reconciliation data and are never added to Sales totals.
+
+---
+
+## S9 — Production, Labels & Physical Inventory
 
 > **Scope correction (ADR-0020 §A.8).** The `ProductionOrder` aggregate, its idempotent `QUEUED`
 > creation from `QuoteApproved`, and the `QUEUED → CANCELED` supersession transition are **S6**
@@ -460,6 +474,19 @@ is impossible; the monthly cost figure excludes inventory purchases.
 
 - `ProductionOrderItem`, planned material explosion snapshot and actual material recording,
   against the `ProductionOrder` S6 already persists (unique on `quote_revision_id`).
+- Raw-material reservation; actual material/component quantities; atomic, idempotent
+  `InventoryMovement(Consumption)` posting under H-007 B; scrap/failure and good-unit recording.
+- **Acknowledged over-consumption:** when actual consumption exceeds available ledger stock, the
+  system rejects `INSUFFICIENT_STOCK` rather than allowing a negative balance. The operator must
+  acknowledge the discrepancy with a nonblank reason; in the same transaction it posts
+  `InventoryMovement(Correction)` to restore the quantity required to represent reality, then
+  `InventoryMovement(Consumption)` for the exact physical quantity consumed. Both permanent,
+  independently auditable movements retain actor, timestamp and reason; no hidden or automatic
+  stock creation is allowed. H-007 B idempotency covers the production actual and both movements,
+  so replay cannot duplicate a Correction, Consumption or production-actual record. Physical fact
+  wins, but ledger correction is explicit and audited.
+- Finished-goods stock and movements, plus physical consumption of fulfilment packaging. These
+  are S9 physical facts; S11 may value and reconcile them but never posts them.
 - The **operational** transitions of the full state machine:
   `QUEUED → IN_PRODUCTION → READY → SHIPPED → DELIVERED`, plus operator-initiated cancellation
   from any non-terminal state. The `QUEUED → CANCELED (SUPERSEDED_BY_REVISION)` path and the
@@ -486,20 +513,22 @@ document is correct after the underlying recipe is edited.
 ## S10 — Energy
 
 - `EnergyTariff` + versions with the temporal exclusion constraint; resolver by instant;
-  migration of the S4 flat price into a seeded tariff version.
+  the first tariff is introduced here because no pre-S10 tariff or flat energy price exists.
 - `EnergyConsumptionSession`, `IEnergyProvider` with `Estimated` and `Manual` implementations.
 - `SmartPlugEnergyProvider` **interface and registration only** — no vendor code until the
   device is chosen. `EnergyPollJob` scaffolded and disabled.
 - Machine hourly rate derivation (CR-04.1) surfaced in the UI.
 
-**Exit:** a quote created before S10 still resolves its frozen energy price; new quotes resolve
-the tariff version valid at issue time.
+**Exit:** a pre-S10 quote remains an immutable snapshot with energy unavailable/absent rather than
+being reinterpreted as zero; new quotes resolve and freeze the tariff version valid at issue time.
 
 ---
 
-## S11 — Actual Cost Reconciliation
+## S11 — Actual Cost Valuation & Reconciliation
 
-- `ProductionOrderItemActualMaterial` recording, emitting stock `OUT` movements.
+- Values S9-recorded actual consumption; S11 posts no inventory movement.
+- Owns actual unit cost, actual total cost, variance, realized margin/contribution and the
+  valuation/reconciliation read models over S9 physical facts.
 - Actual energy via sessions linked to production items.
 - `Sale.cost_basis` transitions `ESTIMATED → MIXED → ACTUAL` as items reconcile.
 - Variance computation (CR-09) as derived read models; per-item and per-period.
@@ -520,6 +549,8 @@ sale's realized margin updates without touching the quote snapshot.
   including the `null` case), material and energy consumption, estimated vs actual, margin
   variance.
 - CSV export of each report (permission-gated, audited).
+- Marketplace operational-order ingestion is S8C, not S12; S12 only reconciles provider
+  analytics with canonical Sales.
 
 **Exit:** every metric in the data dictionary is derivable and matches a hand-computed control
 case; conversion never reports open quotes as failures.

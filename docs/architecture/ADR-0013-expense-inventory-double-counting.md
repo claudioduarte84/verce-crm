@@ -4,6 +4,11 @@
 - **Date:** 2026-09-06
 - **Sprint:** S0
 
+> **Supersession.** The S3 inventory ledger replaced the lot model used by this historical
+> decision. [ADR-0021](ADR-0021-s8a-sale-conversion-and-expense-model.md) amends the current S8A
+> target architecture to link an Expense to a PurchaseReceipt `InventoryMovement` by plain UUID. The
+> original context, decision and consequences are preserved below.
+
 ## Context
 
 A spool of PLA costs R$ 89,90. That money can enter the system through two doors:

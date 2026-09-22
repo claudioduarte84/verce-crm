@@ -22,7 +22,7 @@ Related: [ADR-0002 Money, Precision and Rounding](architecture/ADR-0002-money-pr
 | S4 Laboratory wastage input | `decimal` | scenario/line overrides not persisted; global Setting is persisted | percentage points 0–100; divide by 100 in formula |
 | Weight in grams | `decimal` | `numeric(12,3)` | 3 |
 | Weight in kilograms | derived, never stored | — | — |
-| Energy | `decimal` | `numeric(12,4)` | 4 (kWh) |
+| Energy (future S10) | `decimal` | `numeric(12,4)` | 4 (kWh) |
 | Power | `int` | `integer` | watts |
 | Quantity | `decimal` | `numeric(14,4)` | 4 |
 | Duration | `int` | `integer` | seconds |
@@ -130,6 +130,9 @@ CR-05.1 machine-power estimate. The selected source is recorded in the future br
 
 ### CR-06.2 — Direct cost
 `directCost = round6(filamentCost + suppliesCost + packagingCost + manualCost + energyCost + machineCost + laborCost)`.
+
+`energyCost` is a future S10 component. Before S10 it is unavailable/absent from CostEngine input
+and breakdowns, not a zero-valued component.
 
 ### CR-06.3 — Wastage
 `wastageBase = filamentCost + suppliesCost + packagingCost` and
@@ -333,11 +336,13 @@ erodes the margin the operator asked for.
 > `40,995 → 41,99`, `41,00 → 41,99`, `41,99 → 41,99`, `41,991 → 42,99`. For every valid raw price,
 > `suggestedPrice ≥ rawPrice` holds under this policy, same as every other rounding-up policy.
 
-### CR-07.5 — Bracket resolution (fee depends on price, price depends on fee)
+### CR-07.5 — Bracket resolution (S8A target)
 
-When a `FeeRuleVersion` has price brackets, the fee cannot be known before the price and the
-price cannot be computed before the fee. Resolution is a **consistency search**, not iteration
-to a fixed point:
+Bracket resolution has two distinct normative modes.
+
+**`CONSISTENCY_SEARCH` — suggested-price derivation.** When the system derives a price from fee
+and margin inputs, the fee cannot be known before the price and the price cannot be computed
+before the fee. Resolution is a consistency search, not iteration to a fixed point:
 
 ```
 1. Sort brackets ascending by MinPrice.
@@ -355,16 +360,28 @@ to a fixed point:
                                                     The operator must set the price manually.
 ```
 Step 6 and 7 exist so the system can never return a price that silently misses the requested
-margin. Brackets are not used before S8; the algorithm is specified now so the fee model does
-not have to be redesigned later.
+margin.
+
+**`PRICE_CONTAINMENT` — final supplied-price resolution.** When the final buyer price is already
+known — including a manual override or the post-discount `netUnitPrice` used as the final
+commission basis — resolve the bracket containing that price:
+
+```text
+MinPrice <= price < MaxPrice
+```
+
+The last bracket may have no `MaxPrice` and is therefore open-ended. This mode is not circular:
+price is an input, not the derived output. `VERSION_FLAT` records a version without brackets;
+`BOUNDARY_PINNED` records the discontinuity fallback from step 6 above.
 
 ### CR-07.6 — Minimum and maximum fee
 ```
-commissionAmount = round2( finalUnitPrice * commissionPercent )
+commissionAmount = round2( netUnitPrice * commissionPercent )
 if minimumFee is set: commissionAmount = max(commissionAmount, minimumFee)
 if maximumFee is set: commissionAmount = min(commissionAmount, maximumFee)
 ```
-Clamping is applied **after** the price is computed. When a clamp is active, the effective
+Clamping is applied **after** rounding. `netUnitPrice` is the final buyer-paying price after any
+discount, not `suggestedPrice` or pre-discount `unitPrice`. When a clamp is active, the effective
 margin (CR-08.4) will differ from the desired margin; that difference must be surfaced in the
 breakdown as `feeClampApplied: MIN|MAX`, never hidden.
 
@@ -459,7 +476,8 @@ change · line removal · zero basis.
 unitPrice = manualPriceOverride ?? suggestedPrice
 ```
 An override is always allowed and always recorded (`PriceOverridden = true` in the snapshot),
-so "why is this cheaper than suggested?" is answerable.
+so "why is this cheaper than suggested?" is answerable. A manual override re-resolves the fee
+bracket by price containment (CR-07.5).
 
 ### CR-08.2 — Discount
 ```
@@ -469,6 +487,7 @@ DiscountKind = AMOUNT   → discountAmount = round2( discountValue )
 
 netUnitPrice = unitPrice - discountAmount        (must be > 0, else DISCOUNT_EXCEEDS_PRICE)
 ```
+Commission is calculated from this `netUnitPrice`, then rounded and clamped under CR-07.6.
 Discount is per item. A global quote-level discount is **deliberately not implemented in v1**:
 it would have to be allocated back to items to keep per-item margin correct, and that
 allocation is a second, avoidable rounding source. If it is added later it must be modeled as
@@ -496,6 +515,12 @@ effectiveMargin = lineTotalAmount > 0
                   ? round6( expectedProfit / lineTotalAmount )
                   : 0
 ```
+
+Whenever effective margin differs from the desired margin, the pricing result and immutable
+snapshot expose the applicable explanation metadata: `priceOverridden`, `discountApplied`,
+`bracketResolution` (`CONSISTENCY_SEARCH|PRICE_CONTAINMENT|VERSION_FLAT|BOUNDARY_PINNED`) and
+`feeClampApplied` (`MIN|MAX|null`). An effective-margin value without its deviation cause is not
+sufficient for **Explain This Price**.
 
 **Invariant CR-08.5 (must be a test):** with `roundingPolicy = NONE`, no discount, no override,
 no fee clamp, `effectiveMargin` equals `desiredMargin` within 0,0001. Any larger deviation

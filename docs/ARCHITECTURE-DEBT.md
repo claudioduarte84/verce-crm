@@ -52,18 +52,18 @@ row unresolved has not met its Definition of Done, and the reviewer should rejec
 | ID | Area | Decision required | **Decision deadline** | **Implementation deadline** | Status |
 |---|---|---|---|---|---|
 | **H-001** | Quoting / Production | Revision ↔ production lifecycle: behaviour when a superseded revision has an order in each state; whether `has_pending_revision` blocks queue actions; what happens to actual consumption already recorded against a canceled order | **Before S6** | **S6 (Production Core) / S9 (operational)** | **Decision recorded (S6 entry, corrected)** — [ADR-0020 §A](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md); the minimum `ProductionOrder` persistence the `QuoteApproved` transactional invariant needs (§A.8) is now **S6** scope; the operational shop floor (items, material, printer/scheduling UX) remains **S9** |
-| **H-002** | Sales | Sale lifecycle: when a sale may be created from a revision, whether cancellation reverses stock, interaction with a delivered production order, whether partial/multiple sales per revision are permitted | S8 | S8 | Open |
-| **H-003** | Sales / Pricing | Mixed channel and fulfilment: an item-level channel override changes fees per line — how a single sale spanning two channels reports revenue, fees and margin, and whether it is permitted at all | S8 | S8 | Open |
+| **H-002** | Sales | Sale lifecycle and conversion cardinality | S8 | S8 | **Decision recorded (S8A.ARCH)** — [ADR-0021](architecture/ADR-0021-s8a-sale-conversion-and-expense-model.md); implementation remains S8A |
+| **H-003** | Sales / Pricing | Mixed-channel commercial order rule | S8 | S8 | **Decision recorded (S8A.ARCH)** — [ADR-0022](architecture/ADR-0022-pricing-override-discount-bracket-precedence.md); implementation remains S8A |
 | **H-004** | Pricing | `PER_ORDER` fixed-fee allocation: rounding of `fixedFee / quantity` across lines, residual-cent assignment, behaviour when quantity changes on a revision | S5 (single-item case) / **S6** (cross-line case) | S5 (single-item case) / **S6** (cross-line case) | **Decision recorded (S6 entry)** — single-item case closed by S5; cross-line remainder by [ADR-0020 §C](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md) + [CR-07.7](CALCULATION-RULES.md#cr-077--per_order-fee-allocation-across-lines); implementation owed by S6 |
-| **H-005** | Pricing | Interaction of manual price override, item discount and bracket resolution: precedence, whether an override re-resolves the bracket, how effective margin is reported when all three apply | **S8** | **S8** | **Deadline corrected (S5)** — see note below |
+| **H-005** | Pricing | Override, discount and bracket precedence | **S8** | **S8** | **Decision recorded (S8A.ARCH)** — [ADR-0022](architecture/ADR-0022-pricing-override-discount-bracket-precedence.md); implementation remains S8A |
 | **H-006** | Costing / Production | Actual total cost composition: manual lines with no actual counterpart, partial reconciliation, failed units, exact exclusion of wastage from the actual side | **Before S10** | S11 | Open |
 | **H-007 A** | Inventory | Stock movement sign convention and `StockCount` concurrency (two counts of one material racing) | S3 | S3 | **Closed (S3)** — see [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) §1, §3 |
-| **H-007 B** | Inventory / Production | Actual-consumption idempotency: preventing a production item's consumption being recorded twice | S11 | S11 | Open |
-| **H-008 A** | Finance | Expense / double-count model: treatment boundaries and prevention of operator misclassification | S8 | S8 | Open |
+| **H-007 B** | Inventory / Production | Actual-consumption idempotency: preventing a production item's consumption being recorded twice | S9 | S9 | Open |
+| **H-008 A** | Finance | Expense / double-count model | S8 | S8 | **Decision recorded (S8A.ARCH)** — [ADR-0021](architecture/ADR-0021-s8a-sale-conversion-and-expense-model.md); implementation remains S8A |
 | **H-008 B** | Reporting | Cash Result vs Product Margin consistency across every report surface | **Before S12** | S12 | Open |
 | **H-009 A** | Quoting | **Commercial** conversion semantics: quotes reopened after a terminal state, quotes whose current revision returns to `GENERATED` | **Before S6** | S6 | **Decision recorded (S6 entry)** — [ADR-0020 §B](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md) + [DATA-DICTIONARY §4.1](DATA-DICTIONARY.md#41-conversion-rate-taxa-de-conversão); implementation owed by S6 |
 | **H-009 B** | Reporting | Conversion reporting: cohort labelling of incomplete periods, `null` handling | S12 | S12 | Open |
-| **H-010** | Energy / Costing | Energy tariff availability before the Energy module exists: S4–S9 must price energy from the seeded default tariff without hard-coding a value, and S10 must not retroactively change quotes priced earlier | **Before S4** | S4 | Open |
+| **H-010** | Energy / Costing | Energy is absent before S10: the CostEngine has no energy component, the Energy module is a stub and no seeded tariff exists. Freeze how unavailable energy is represented without misreporting it as zero | **Before S10** | S10 | Open |
 | **H-011** | Documents | S7 was frozen to persist the default proposal as `document_type`/`document_template`/`document_template_version` DATA and render it through a generic block-tree walker over a closed binding catalogue (ADR-0007 §7, S7/S14 scope authority gate 2026-09-21). | **Before S14** | S14 | **Closed (S7 template-engine final pass)** — see note below |
 
 ### Resolution note for H-011 (S7 template-engine final pass, 2026-09-21)
@@ -228,11 +228,11 @@ definitions.
 
 ### Cross-cutting note for H-010
 
-This one has the earliest deadline and is the easiest to get wrong. S4 ships the cost engine
-while tariff versioning arrives only in S10. The constraint already stated in
-[ROADMAP](ROADMAP.md#s10--energy) is that S4–S9 read the **seeded default tariff** and freeze its
-price into the snapshot, so no sprint before S10 may embed a literal price per kWh. S4's delivery
-must make that explicit rather than leaving it implied.
+Repository reality is that the current CostEngine has no energy component, the Energy module is
+a stub and no seeded default tariff exists. Until S10, energy input and cost are explicitly
+**unavailable/absent**, never implicitly `0`: pricing, cost breakdowns and margin explanations
+must not suggest `R$ 0` energy merely because the capability is missing. S10 owns the Energy
+implementation and must preserve the meaning of earlier immutable snapshots. H-010 remains open.
 
 ---
 
