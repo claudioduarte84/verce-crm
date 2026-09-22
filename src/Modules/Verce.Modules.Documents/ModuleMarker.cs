@@ -2,11 +2,13 @@ namespace Verce.Modules.Documents;
 
 /// <summary>
 /// Marker for the Documents module boundary (ARCHITECTURE.md §3 module map).
-/// Owns: DocumentType, binding catalogues, DocumentTemplate(+versions), render pipeline, GeneratedDocument.
-/// This module has no domain logic yet — it is scaffolded in S1 purely so that
-/// module boundaries exist and are enforceable by Verce.Architecture.Tests.
-/// Real aggregates, application services and infrastructure arrive in the sprint
-/// that owns this module per docs/ROADMAP.md.
+/// Owns: <see cref="GeneratedDocument"/>, content-addressed artifact storage
+/// (<see cref="IDocumentStorage"/>), the built-in Quote PDF V1 render pipeline
+/// (<see cref="QuotePdfInput"/>, <see cref="QuotePdfHtmlTemplate"/>, <see cref="IHtmlToPdfRenderer"/>).
+/// S7 ships the minimal slice ADR-0016 anticipates — a single hard-coded, non-user-editable
+/// template. The S14 Document Studio (generic block/binding catalogue, DocumentType,
+/// DocumentTemplate versioning, arbitrary templates) is explicitly out of scope and NOT built
+/// here; this module's shape is deliberately additive so S14 can extend it later.
 /// </summary>
 public static class DocumentsModuleMarker
 {

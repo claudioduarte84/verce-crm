@@ -10,6 +10,7 @@
     <Project Path="src/Modules/Verce.Modules.Costing/Verce.Modules.Costing.csproj" />
     <Project Path="src/Modules/Verce.Modules.Customers/Verce.Modules.Customers.csproj" />
     <Project Path="src/Modules/Verce.Modules.Documents/Verce.Modules.Documents.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Documents.RenderWorker/Verce.Modules.Documents.RenderWorker.csproj" />
     <Project Path="src/Modules/Verce.Modules.Energy/Verce.Modules.Energy.csproj" />
     <Project Path="src/Modules/Verce.Modules.Finance/Verce.Modules.Finance.csproj" />
     <Project Path="src/Modules/Verce.Modules.Inventory/Verce.Modules.Inventory.csproj" />
@@ -28,6 +29,7 @@
     <Project Path="tests/Verce.Pricing.Tests/Verce.Pricing.Tests.csproj" />
     <Project Path="tests/Verce.Quoting.Tests/Verce.Quoting.Tests.csproj" />
     <Project Path="tests/Verce.Production.Tests/Verce.Production.Tests.csproj" />
+    <Project Path="tests/Verce.Documents.Tests/Verce.Documents.Tests.csproj" />
     <Project Path="tests/Verce.IntegrationTests/Verce.IntegrationTests.csproj" />
     <Project Path="tests/Verce.Platform.Tests.Fixtures.Cyclic/Verce.Platform.Tests.Fixtures.Cyclic.csproj" />
     <Project Path="tests/Verce.Platform.Tests.Fixtures.Orphan/Verce.Platform.Tests.Fixtures.Orphan.csproj" />

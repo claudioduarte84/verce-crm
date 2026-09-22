@@ -70,7 +70,7 @@ public sealed class QuotingTransactionalInvariantTests : IAsyncLifetime
         {
             var item = TestItem("Item", direct.Id);
             var quote = new Verce.Modules.Quoting.Quote(1, today, new CustomerSnapshotInput(null, null, null, null, null),
-                direct.Id, [item], 15, null, Guid.NewGuid(), clock.UtcNow);
+                direct.Id, [item], 15, ProposalContentInput.Empty, null, Guid.NewGuid(), clock.UtcNow);
             ctx.Add(quote);
             quoteId = quote.Id;
             await Task.CompletedTask;
@@ -108,7 +108,7 @@ public sealed class QuotingTransactionalInvariantTests : IAsyncLifetime
                 .Include(x => x.Revisions).ThenInclude(x => x.History).SingleAsync(x => x.Id == quoteId, ct);
             var item = TestItem("Item R2", direct.Id);
             var r2 = quote.ConstructNextRevision(new CustomerSnapshotInput(null, null, null, null, null), direct.Id,
-                [item], 15, today, null, Guid.NewGuid(), clock.UtcNow);
+                [item], 15, ProposalContentInput.Empty, today, null, Guid.NewGuid(), clock.UtcNow);
             r2Id = r2.Id;
         });
         r2Id = await db.Set<Verce.Modules.Quoting.QuoteRevision>().AsNoTracking()
@@ -152,9 +152,9 @@ public sealed class QuotingTransactionalInvariantTests : IAsyncLifetime
         {
             var item = TestItem("Item", direct.Id);
             var quoteA = new Verce.Modules.Quoting.Quote(1, today, new CustomerSnapshotInput(null, null, null, null, null),
-                direct.Id, [item], 1, null, Guid.NewGuid(), clock.UtcNow); // 1-day validity: expires tomorrow
+                direct.Id, [item], 1, ProposalContentInput.Empty, null, Guid.NewGuid(), clock.UtcNow); // 1-day validity: expires tomorrow
             var quoteB = new Verce.Modules.Quoting.Quote(2, today, new CustomerSnapshotInput(null, null, null, null, null),
-                direct.Id, [item], 365, null, Guid.NewGuid(), clock.UtcNow); // long validity: must NOT expire
+                direct.Id, [item], 365, ProposalContentInput.Empty, null, Guid.NewGuid(), clock.UtcNow); // long validity: must NOT expire
             ctx.Add(quoteA);
             ctx.Add(quoteB);
             await Task.CompletedTask;
@@ -220,7 +220,7 @@ public sealed class QuotingTransactionalInvariantTests : IAsyncLifetime
             foreach (var validityDays in new[] { 1, 2, 3 })
             {
                 ctx.Add(new Verce.Modules.Quoting.Quote(validityDays, today, new CustomerSnapshotInput(null, null, null, null, null),
-                    direct.Id, [item], validityDays, null, Guid.NewGuid(), clock.UtcNow));
+                    direct.Id, [item], validityDays, ProposalContentInput.Empty, null, Guid.NewGuid(), clock.UtcNow));
             }
             await Task.CompletedTask;
         });
@@ -263,7 +263,7 @@ public sealed class QuotingTransactionalInvariantTests : IAsyncLifetime
             for (var i = 1; i <= 3; i++)
             {
                 ctx.Add(new Verce.Modules.Quoting.Quote(i, today, new CustomerSnapshotInput(null, null, null, null, null),
-                    direct.Id, [item], 1, null, Guid.NewGuid(), clock.UtcNow));
+                    direct.Id, [item], 1, ProposalContentInput.Empty, null, Guid.NewGuid(), clock.UtcNow));
             }
             await Task.CompletedTask;
         });

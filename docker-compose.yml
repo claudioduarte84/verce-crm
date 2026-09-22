@@ -26,6 +26,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Verce: Host=postgres;Port=5432;Database=verce;Username=verce;Password=verce_dev_only
       BrandAssets__StorageRoot: /var/lib/verce/brand-assets
+      Documents__StorageRoot: /var/lib/verce/documents
       Settings__SeedOnStartup: "true"
       DataProtection__CurrentCertificatePath: /run/secrets/verce-dp.pfx
       DataProtection__CertificatePasswordFile: /run/secrets/verce-dp-password
@@ -33,6 +34,7 @@ services:
       - "8080:8080"
     volumes:
       - verce_brand_assets:/var/lib/verce/brand-assets
+      - verce_documents:/var/lib/verce/documents
       - ${VERCE_DP_CERT_PATH:-./secrets/verce-dp.pfx}:/run/secrets/verce-dp.pfx:ro
       - ${VERCE_DP_PASSWORD_PATH:-./secrets/verce-dp-password}:/run/secrets/verce-dp-password:ro
     depends_on:
@@ -43,3 +45,8 @@ services:
 volumes:
   verce_postgres_data:
   verce_brand_assets:
+  # ADR-0016: generated_document rows point at content-addressed HTML/PDF blobs stored here —
+  # evidence (CLAUDE.md rule 13), never regenerable from the database alone. Persistent across
+  # container recreation exactly like verce_brand_assets; see docs/OPERATIONS.md §4 for backup
+  # coverage.
+  verce_documents:

@@ -84,6 +84,19 @@ public sealed class QuoteRevisionConfiguration : IEntityTypeConfiguration<QuoteR
         b.Property(x => x.ApprovedAt);
         b.Property(x => x.ApprovedBy);
 
+        // S7 proposal-content snapshot (ADR-0016 §7, DOMAIN-MODEL §8) — all optional, frozen at
+        // construction. Never mutated after the revision is persisted.
+        b.Property(x => x.Title).HasMaxLength(200);
+        b.Property(x => x.Scope).HasMaxLength(4000);
+        b.Property(x => x.TechnicalHighlightsJson).HasColumnName("technical_highlights").HasColumnType("jsonb");
+        b.Property(x => x.TechnicalNotes).HasMaxLength(4000);
+        b.Property(x => x.OutOfScope).HasMaxLength(4000);
+        b.Property(x => x.PaymentTerms).HasMaxLength(2000);
+        b.Property(x => x.DeliveryTerms).HasMaxLength(2000);
+        b.Property(x => x.Warranty).HasMaxLength(2000);
+        b.Property(x => x.Notes).HasMaxLength(4000);
+        b.Property(x => x.InternalNotes).HasMaxLength(4000);
+
         b.Property(x => x.SubtotalAmount).HasColumnType($"numeric(18,{Rounding.MoneyScale})").IsRequired();
         b.Property(x => x.DiscountAmount).HasColumnType($"numeric(18,{Rounding.MoneyScale})").IsRequired();
         b.Property(x => x.TotalAmount).HasColumnType($"numeric(18,{Rounding.MoneyScale})").IsRequired();

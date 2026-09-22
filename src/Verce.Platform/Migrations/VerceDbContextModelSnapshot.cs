@@ -631,6 +631,319 @@ namespace Verce.Platform.Migrations
                     b.ToTable("customer_address", "customers");
                 });
 
+            modelBuilder.Entity("Verce.Modules.Documents.DocumentTemplate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("DocumentTypeCode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("document_type_code");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_default");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_document_template");
+
+                    b.HasIndex("DocumentTypeCode")
+                        .IsUnique()
+                        .HasDatabaseName("ix_document_template_default_per_type")
+                        .HasFilter("is_default AND deleted_at IS NULL");
+
+                    b.ToTable("document_template", "documents");
+                });
+
+            modelBuilder.Entity("Verce.Modules.Documents.DocumentTemplateVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("DefinitionJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("definition");
+
+                    b.Property<Guid>("DocumentTemplateId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_template_id");
+
+                    b.Property<string>("PageSetupJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("page_setup");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("published_at");
+
+                    b.Property<Guid?>("PublishedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("published_by");
+
+                    b.Property<int>("SchemaVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("schema_version");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("version_number");
+
+                    b.HasKey("Id")
+                        .HasName("pk_document_template_version");
+
+                    b.HasIndex("DocumentTemplateId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_document_template_version_one_open_draft")
+                        .HasFilter("status = 'DRAFT'");
+
+                    b.HasIndex("DocumentTemplateId", "VersionNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_document_template_version_document_template_id_version_numb");
+
+                    b.ToTable("document_template_version", "documents", t =>
+                        {
+                            t.HasCheckConstraint("ck_document_template_version_status", "status IN ('DRAFT','PUBLISHED','ARCHIVED')");
+                        });
+                });
+
+            modelBuilder.Entity("Verce.Modules.Documents.DocumentType", b =>
+                {
+                    b.Property<string>("Code")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("code");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.HasKey("Code")
+                        .HasName("pk_document_type");
+
+                    b.ToTable("document_type", "documents");
+                });
+
+            modelBuilder.Entity("Verce.Modules.Documents.GeneratedDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.PrimitiveCollection<Guid[]>("BrandAssetVersionIds")
+                        .IsRequired()
+                        .HasColumnType("uuid[]")
+                        .HasColumnName("brand_asset_version_ids");
+
+                    b.Property<string>("ChromiumVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("chromium_version");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<Guid>("DocumentTemplateVersionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("document_template_version_id");
+
+                    b.Property<string>("DocumentTypeCode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("document_type_code");
+
+                    b.Property<Guid?>("GeneratedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("generated_by_user_id");
+
+                    b.Property<string>("HtmlSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("html_sha256");
+
+                    b.Property<string>("HtmlStorageKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("html_storage_key");
+
+                    b.Property<bool>("IsCurrent")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_current");
+
+                    b.Property<DateTimeOffset>("IssuedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("issued_at");
+
+                    b.Property<string>("PdfSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("pdf_sha256");
+
+                    b.Property<long>("PdfSizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("pdf_size_bytes");
+
+                    b.Property<string>("PdfStorageKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("pdf_storage_key");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("purpose");
+
+                    b.Property<string>("ReissueReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("reissue_reason");
+
+                    b.Property<string>("RenderDataSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("render_data_snapshot_json");
+
+                    b.Property<string>("RenderEngineVersion")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("render_engine_version");
+
+                    b.Property<Guid>("RenderRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("render_request_id");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_id");
+
+                    b.Property<string>("SourceType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("source_type");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_generated_document");
+
+                    b.HasIndex("DocumentTemplateVersionId")
+                        .HasDatabaseName("ix_generated_document_document_template_version_id");
+
+                    b.HasIndex("DocumentTypeCode")
+                        .HasDatabaseName("ix_generated_document_document_type_code");
+
+                    b.HasIndex("PdfSha256")
+                        .HasDatabaseName("ix_generated_document_pdf_sha256");
+
+                    b.HasIndex("RenderRequestId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_generated_document_render_request_id");
+
+                    b.HasIndex("SourceType", "SourceId", "DocumentTypeCode")
+                        .IsUnique()
+                        .HasDatabaseName("ix_generated_document_current_per_source")
+                        .HasFilter("is_current");
+
+                    b.ToTable("generated_document", "documents", t =>
+                        {
+                            t.HasCheckConstraint("ck_generated_document_pdf_size_positive", "pdf_size_bytes > 0");
+
+                            t.HasCheckConstraint("ck_generated_document_purpose", "purpose IN ('PREVIEW', 'ISSUED')");
+                        });
+                });
+
             modelBuilder.Entity("Verce.Modules.Inventory.InventoryMovement", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1705,6 +2018,11 @@ namespace Verce.Platform.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("customer_name_snapshot");
 
+                    b.Property<string>("DeliveryTerms")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("delivery_terms");
+
                     b.Property<decimal>("DiscountAmount")
                         .HasColumnType("numeric(18,2)")
                         .HasColumnName("discount_amount");
@@ -1717,9 +2035,29 @@ namespace Verce.Platform.Migrations
                         .HasColumnType("numeric(18,2)")
                         .HasColumnName("expected_profit_amount");
 
+                    b.Property<string>("InternalNotes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("internal_notes");
+
                     b.Property<DateTimeOffset>("IssuedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("issued_at");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("notes");
+
+                    b.Property<string>("OutOfScope")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("out_of_scope");
+
+                    b.Property<string>("PaymentTerms")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("payment_terms");
 
                     b.Property<Guid>("QuoteId")
                         .HasColumnType("uuid")
@@ -1739,6 +2077,11 @@ namespace Verce.Platform.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("sales_channel_id");
 
+                    b.Property<string>("Scope")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("scope");
+
                     b.Property<Guid?>("SourceRevisionId")
                         .HasColumnType("uuid")
                         .HasColumnName("source_revision_id");
@@ -1756,6 +2099,20 @@ namespace Verce.Platform.Migrations
                     b.Property<Guid?>("SupersededByRevisionId")
                         .HasColumnType("uuid")
                         .HasColumnName("superseded_by_revision_id");
+
+                    b.Property<string>("TechnicalHighlightsJson")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("technical_highlights");
+
+                    b.Property<string>("TechnicalNotes")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("technical_notes");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("title");
 
                     b.Property<decimal>("TotalAmount")
                         .HasColumnType("numeric(18,2)")
@@ -1780,6 +2137,11 @@ namespace Verce.Platform.Migrations
                     b.Property<int>("ValidityDays")
                         .HasColumnType("integer")
                         .HasColumnName("validity_days");
+
+                    b.Property<string>("Warranty")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("warranty");
 
                     b.HasKey("Id")
                         .HasName("pk_quote_revision");
@@ -2955,6 +3317,43 @@ namespace Verce.Platform.Migrations
                         .HasConstraintName("fk_customer_address_customer_customer_id");
                 });
 
+            modelBuilder.Entity("Verce.Modules.Documents.DocumentTemplate", b =>
+                {
+                    b.HasOne("Verce.Modules.Documents.DocumentType", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentTypeCode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_template_document_type_document_type_code");
+                });
+
+            modelBuilder.Entity("Verce.Modules.Documents.DocumentTemplateVersion", b =>
+                {
+                    b.HasOne("Verce.Modules.Documents.DocumentTemplate", null)
+                        .WithMany("Versions")
+                        .HasForeignKey("DocumentTemplateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_document_template_version_document_template_document_templa");
+                });
+
+            modelBuilder.Entity("Verce.Modules.Documents.GeneratedDocument", b =>
+                {
+                    b.HasOne("Verce.Modules.Documents.DocumentTemplateVersion", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentTemplateVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_generated_document_document_template_version_document_templ");
+
+                    b.HasOne("Verce.Modules.Documents.DocumentType", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentTypeCode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_generated_document_document_type_document_type_code");
+                });
+
             modelBuilder.Entity("Verce.Modules.Inventory.InventoryMovement", b =>
                 {
                     b.HasOne("Verce.Modules.Inventory.Supply", null)
@@ -3112,6 +3511,11 @@ namespace Verce.Platform.Migrations
             modelBuilder.Entity("Verce.Modules.Customers.Customer", b =>
                 {
                     b.Navigation("Addresses");
+                });
+
+            modelBuilder.Entity("Verce.Modules.Documents.DocumentTemplate", b =>
+                {
+                    b.Navigation("Versions");
                 });
 
             modelBuilder.Entity("Verce.Modules.Inventory.Supply", b =>

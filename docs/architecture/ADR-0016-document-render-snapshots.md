@@ -77,7 +77,11 @@ enforced structurally — there is no code path that overwrites a generated docu
 
 When an operator re-renders an already-issued revision (say, after a template fix), the UI must
 state that the customer holds a different version, and the audit log records who re-rendered and
-why.
+why. **"Why" is a required, non-blank, operator-typed reason** (`GeneratedDocument.ReissueReason`,
+bounded at 2000 characters) — the reissue endpoint rejects a missing or blank one outright
+(`DOCUMENT_REISSUE_REASON_REQUIRED`), and the UI makes a blank submission impossible rather than
+merely discouraged. A FIRST render carries no reason at all (there is nothing yet to explain);
+only a deliberate reissue requires one.
 
 ### 6. Reproducibility requires self-contained rendering
 

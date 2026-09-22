@@ -102,3 +102,38 @@ public sealed class QuoteExpiredEvent : DomainEventBase
         RevisionId = revisionId;
     }
 }
+
+/// <summary>
+/// S7/S14 scope authority gate §12/§54-59: the integration-event half of approval (ADR-0012 §1 —
+/// "approving a quote raises QuoteApproved (synchronous, creates the production order) AND
+/// GenerateQuotePdfRequested (integration)"). Raised in the SAME transaction as
+/// <see cref="QuoteApprovedEvent"/>, but dispatched only AFTER commit, from the outbox — a PDF
+/// render must never be able to fail (or even delay) the approval transaction. <see cref="RenderRequestId"/>
+/// is minted once, HERE, and is the outbox consumer's idempotency key (<c>document:{RenderRequestId}</c>,
+/// ADR-0012 §22): a retried delivery of this exact message must converge on one document, never
+/// produce a second one.
+/// </summary>
+public sealed class GenerateQuotePdfRequestedEvent : IIntegrationEvent
+{
+    public Guid EventId { get; }
+    public string EventType => nameof(GenerateQuotePdfRequestedEvent);
+    public DateTimeOffset OccurredAtUtc { get; }
+    public Guid CorrelationId { get; }
+    public Guid? CausationId { get; }
+    public string IdempotencyKey => $"document:{RenderRequestId:D}";
+
+    public Guid QuoteId { get; }
+    public Guid QuoteRevisionId { get; }
+    public Guid RenderRequestId { get; }
+
+    public GenerateQuotePdfRequestedEvent(Guid correlationId, Guid? causationId, DateTimeOffset now, Guid quoteId, Guid quoteRevisionId, Guid renderRequestId)
+    {
+        EventId = Guid.CreateVersion7();
+        OccurredAtUtc = now;
+        CorrelationId = correlationId;
+        CausationId = causationId;
+        QuoteId = quoteId;
+        QuoteRevisionId = quoteRevisionId;
+        RenderRequestId = renderRequestId;
+    }
+}

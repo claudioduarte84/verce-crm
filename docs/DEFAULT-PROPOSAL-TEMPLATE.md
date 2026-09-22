@@ -245,8 +245,8 @@ Studio, versioned with the template:
 | `--doc-color-text` | `‹extract›` | PDF |
 | `--doc-color-muted` | `‹extract›` | PDF |
 | `--doc-color-rule` | `‹extract›` | PDF |
-| `--doc-font-heading` | `‹extract›` + web-safe fallback stack | PDF |
-| `--doc-font-body` | `‹extract›` + fallback stack | PDF |
+| `--doc-font-heading` | `‹extract›` + a generic (never host-specific) fallback | PDF |
+| `--doc-font-body` | `‹extract›` + a generic (never host-specific) fallback | PDF |
 | `--doc-size-title/section/body/small` | `‹extract›` | PDF |
 | `--doc-space-*` | `‹extract›` | PDF |
 

@@ -37,10 +37,37 @@ public sealed class BrandAssetProductionStartupTests
     }
 
     [Fact]
+    public async Task Production_without_an_explicit_durable_documents_root_fails_before_serving_HTTP()
+    {
+        var (certificatePath, passwordPath) = WriteCertificate();
+        var brandStorageRoot = Path.Combine(Path.GetTempPath(), "verce-production-assets-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var baseFactory = new VerceWebApplicationFactory(_fixture.ConnectionString,
+                new Dictionary<string, string?>
+                {
+                    ["DataProtection:CurrentCertificatePath"] = certificatePath,
+                    ["DataProtection:CertificatePasswordFile"] = passwordPath,
+                    ["BrandAssets:StorageRoot"] = brandStorageRoot,
+                });
+            await using var production = baseFactory.WithWebHostBuilder(builder => builder.UseEnvironment("Production"));
+            var act = () => production.CreateClient();
+            act.Should().Throw<InvalidOperationException>().WithMessage("*Documents:StorageRoot*");
+        }
+        finally
+        {
+            File.Delete(certificatePath);
+            File.Delete(passwordPath);
+            if (Directory.Exists(brandStorageRoot)) Directory.Delete(brandStorageRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Production_with_an_absolute_brand_root_starts_and_serves_liveness()
     {
         var (certificatePath, passwordPath) = WriteCertificate();
         var storageRoot = Path.Combine(Path.GetTempPath(), "verce-production-assets-" + Guid.NewGuid().ToString("N"));
+        var documentsStorageRoot = Path.Combine(Path.GetTempPath(), "verce-production-documents-" + Guid.NewGuid().ToString("N"));
         try
         {
             await using var baseFactory = new VerceWebApplicationFactory(_fixture.ConnectionString,
@@ -49,6 +76,7 @@ public sealed class BrandAssetProductionStartupTests
                     ["DataProtection:CurrentCertificatePath"] = certificatePath,
                     ["DataProtection:CertificatePasswordFile"] = passwordPath,
                     ["BrandAssets:StorageRoot"] = storageRoot,
+                    ["Documents:StorageRoot"] = documentsStorageRoot,
                 });
             await using var production = baseFactory.WithWebHostBuilder(builder => builder.UseEnvironment("Production"));
             using var client = production.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
@@ -59,6 +87,7 @@ public sealed class BrandAssetProductionStartupTests
             File.Delete(certificatePath);
             File.Delete(passwordPath);
             if (Directory.Exists(storageRoot)) Directory.Delete(storageRoot, recursive: true);
+            if (Directory.Exists(documentsStorageRoot)) Directory.Delete(documentsStorageRoot, recursive: true);
         }
     }
 

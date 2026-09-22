@@ -9,6 +9,37 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Verce.SharedKernel\Verce.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\Verce.Platform\Verce.Platform.csproj" />
+    <!-- F-01 (S7 final-findings correction): the isolated per-render worker executable. Referenced
+         purely so its build output (dll + deps.json + runtimeconfig.json) is copied alongside this
+         assembly — and, transitively, alongside every host that references Documents (Verce.Api,
+         Verce.Documents.Tests, Verce.IntegrationTests) — never invoked via a direct API call. -->
+    <ProjectReference Include="..\Verce.Modules.Documents.RenderWorker\Verce.Modules.Documents.RenderWorker.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.62.0" />
+    <!-- F-02 (S7 final-findings correction): RepeatOn FIRST_ONLY/ALL_EXCEPT_FIRST genuinely
+         cannot be expressed through Playwright/Chromium's header/footer template mechanism alone
+         (it renders the SAME static template on every page — verified against the installed
+         API; there is no per-page-conditional hook). The correct, deterministic implementation
+         is two Chromium print passes (one page-1 template, one subsequent-pages template)
+         spliced into a single output — PdfSharp only ever imports whole pages from one
+         Chromium-produced PDF into another, never generates or edits content. A real, long-
+         established, MIT-licensed project (nuget.org owner "PDFsharp-Team", ~71M downloads
+         across a genuine 1.3.0 -> 6.2.4 release history at docs.pdfsharp.net) — verified the same
+         way the PdfPig provenance defect was found, never repeated unverified. -->
+    <PackageReference Include="PDFsharp" Version="6.2.4" />
+  </ItemGroup>
+
+  <!-- Self-hosted document render fonts (Fonts/README.md) — compiled into the assembly so a
+       published deployment can never be missing them, and so BlockTreeRenderer never depends on
+       a file-system path relative to the process's working directory. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Fonts\Inter-Regular.woff2" LogicalName="Verce.Modules.Documents.Fonts.Inter-Regular.woff2" />
+    <EmbeddedResource Include="Fonts\Inter-Bold.woff2" LogicalName="Verce.Modules.Documents.Fonts.Inter-Bold.woff2" />
+    <EmbeddedResource Include="Fonts\Archivo-Bold.woff2" LogicalName="Verce.Modules.Documents.Fonts.Archivo-Bold.woff2" />
   </ItemGroup>
 
 </Project>

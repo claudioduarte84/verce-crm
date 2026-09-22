@@ -2219,6 +2219,11 @@ export interface paths {
                 query?: {
                     page?: number | string;
                     pageSize?: number | string;
+                    search?: string;
+                    customerId?: string;
+                    status?: components["schemas"]["QuoteRevisionStatus"];
+                    outcome?: string;
+                    expired?: boolean;
                 };
                 header?: never;
                 path?: never;
@@ -2293,6 +2298,50 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["QuoteResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuoteRevisionResponse"][];
                     };
                 };
                 /** @description Not Found */
@@ -2577,6 +2626,237 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{quoteId}/revisions/{revisionId}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    quoteId: string;
+                    revisionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    quoteId: string;
+                    revisionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuotePdfMetadataResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{quoteId}/revisions/{revisionId}/pdf/reissue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    quoteId: string;
+                    revisionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": null | components["schemas"]["QuotePdfReissueRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuotePdfMetadataResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Gateway */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{quoteId}/revisions/{revisionId}/pdf/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    quoteId: string;
+                    revisionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QuotePdfHistoryItemResponse"][];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quotes/{quoteId}/revisions/{revisionId}/pdf/{documentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    quoteId: string;
+                    revisionId: string;
+                    documentId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3300,6 +3580,28 @@ export interface components {
             /** Format: int64 */
             version: number | string;
         };
+        ProposalContentRequest: {
+            title: null | string;
+            scope: null | string;
+            technicalHighlights: null | components["schemas"]["TechnicalHighlightRequest"][];
+            technicalNotes: null | string;
+            outOfScope: null | string;
+            paymentTerms: null | string;
+            deliveryTerms: null | string;
+            warranty: null | string;
+            notes: null | string;
+        };
+        ProposalContentResponse: {
+            title: null | string;
+            scope: null | string;
+            technicalHighlights: components["schemas"]["TechnicalHighlightResponse"][];
+            technicalNotes: null | string;
+            outOfScope: null | string;
+            paymentTerms: null | string;
+            deliveryTerms: null | string;
+            warranty: null | string;
+            notes: null | string;
+        };
         PurchaseReceiptRequest: {
             /** Format: double */
             quantity: number | string;
@@ -3329,6 +3631,7 @@ export interface components {
             items: components["schemas"]["QuoteItemRequest"][];
             /** Format: int32 */
             validityDaysOverride: null | number | string;
+            proposalContent?: null | components["schemas"]["ProposalContentRequest"];
         };
         /** @enum {unknown} */
         QuoteDiscountKind: "None" | "Percent" | "Amount";
@@ -3480,12 +3783,21 @@ export interface components {
             /** Format: uuid */
             id: string;
             number: string;
+            /** Format: date */
+            numberDate: string;
             /** Format: uuid */
             customerId: null | string;
+            customerName: null | string;
+            /** Format: int32 */
+            currentRevisionIndex: number | string;
+            currentRevisionSuffix: string;
             currentStatus: components["schemas"]["QuoteRevisionStatus"];
+            /** Format: date */
+            validUntil: string;
             /** Format: double */
             currentTotalAmount: number | string;
             commercialOutcome: string;
+            productionOrderStatus: null | string;
             /** Format: int64 */
             version: number | string;
         };
@@ -3498,6 +3810,34 @@ export interface components {
             /** Format: int32 */
             total: number | string;
         };
+        QuotePdfHistoryItemResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            issuedAt: string;
+            isCurrent: boolean;
+            pdfSha256: string;
+            downloadUrl: string;
+        };
+        QuotePdfMetadataResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            quoteRevisionId: string;
+            documentTypeCode: string;
+            /** Format: uuid */
+            documentTemplateVersionId: string;
+            pdfSha256: string;
+            /** Format: int64 */
+            pdfSizeBytes: number | string;
+            /** Format: date-time */
+            issuedAt: string;
+            isCurrent: boolean;
+            downloadUrl: string;
+        };
+        QuotePdfReissueRequest: {
+            reason: null | string;
+        };
         QuoteResponse: {
             /** Format: uuid */
             id: string;
@@ -3509,6 +3849,7 @@ export interface components {
             currentRevision: components["schemas"]["QuoteRevisionResponse"];
             commercialOutcome: string;
             hasEverWon: boolean;
+            productionOrderStatus?: null | string;
         };
         QuoteReviseRequest: {
             /** Format: uuid */
@@ -3520,6 +3861,7 @@ export interface components {
             validityDaysOverride: null | number | string;
             /** Format: int64 */
             quoteVersion: number | string;
+            proposalContent?: null | components["schemas"]["ProposalContentRequest"];
         };
         QuoteRevisionResponse: {
             /** Format: uuid */
@@ -3556,6 +3898,7 @@ export interface components {
             /** Format: double */
             effectiveMarginPercent: number | string;
             items: components["schemas"]["QuoteItemResponse"][];
+            proposalContent: components["schemas"]["ProposalContentResponse"];
         };
         /** @enum {unknown} */
         QuoteRevisionStatus: "GENERATED" | "SENT" | "NEGOTIATING" | "APPROVED" | "CANCELED" | "EXPIRED" | "SUPERSEDED";
@@ -3707,6 +4050,14 @@ export interface components {
             filament: null | components["schemas"]["FilamentDetailsRequest"];
             /** Format: int64 */
             version: number | string;
+        };
+        TechnicalHighlightRequest: {
+            label: string;
+            value: string;
+        };
+        TechnicalHighlightResponse: {
+            label: string;
+            value: string;
         };
     };
     responses: never;

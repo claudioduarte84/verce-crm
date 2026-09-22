@@ -85,6 +85,37 @@ public sealed class S5ToS6BootstrapUpgradeTests : IAsyncLifetime
         await command.ExecuteNonQueryAsync();
     }
 
+    /// <summary>S7/S14 scope authority gate correction (2026-09-21): adds ONLY the ten nullable
+    /// proposal-content columns S7 puts on `quoting.quote_revision` — never the `documents`
+    /// schema, never recorded in `__EFMigrationsHistory` — so this test's compiled S7-aware model
+    /// can perform real INSERT/SELECT against a database that is, and remains, genuinely frozen
+    /// at S6 for every purpose this test actually checks (`GetAppliedMigrationsAsync` above
+    /// explicitly asserts S7 is never recorded as applied). Without this, Stage 3's real
+    /// create→send→approve flow — which is this test's actual point, proving S6's new Quoting
+    /// capability against preserved S5 Product/fee data — cannot run at all: EF always includes
+    /// every mapped column on an INSERT of a new row, and `quote_revision` is a table S6 itself
+    /// created, so there is no earlier S6-only shape to fall back to.</summary>
+    private async Task AddS7QuoteRevisionColumnsAsync()
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            ALTER TABLE quoting.quote_revision
+                ADD COLUMN IF NOT EXISTS title character varying(200),
+                ADD COLUMN IF NOT EXISTS scope character varying(4000),
+                ADD COLUMN IF NOT EXISTS technical_highlights jsonb,
+                ADD COLUMN IF NOT EXISTS technical_notes character varying(4000),
+                ADD COLUMN IF NOT EXISTS out_of_scope character varying(4000),
+                ADD COLUMN IF NOT EXISTS payment_terms character varying(2000),
+                ADD COLUMN IF NOT EXISTS delivery_terms character varying(2000),
+                ADD COLUMN IF NOT EXISTS warranty character varying(2000),
+                ADD COLUMN IF NOT EXISTS notes character varying(4000),
+                ADD COLUMN IF NOT EXISTS internal_notes character varying(4000);
+            """;
+        await command.ExecuteNonQueryAsync();
+    }
+
     /// <summary>Same reasoning as <see cref="SeedFilamentCategoryAsync"/>, for the canonical DIRECT
     /// channel <c>PricingSeedService</c> would otherwise have created. Unlike the S4→S5 test, this
     /// is NOT the H-03 bug — PricingSeedService's own readiness check is gated on the S5 migration
@@ -296,7 +327,20 @@ public sealed class S5ToS6BootstrapUpgradeTests : IAsyncLifetime
             var applied = (await db.Database.GetAppliedMigrationsAsync()).ToList();
             applied.Should().Contain(S5FinalMigration, "prior S5 migrations must remain recorded, never rewritten");
             applied.Should().Contain(S6FinalMigration, "the final S6 migration must be the one actually applied");
+            applied.Should().NotContain(x => x.StartsWith("2026092110", StringComparison.Ordinal), "this test proves the S5->S6 upgrade only — S7 is never applied here");
         }
+
+        // S7/S14 scope authority gate correction (2026-09-21): S7 added ten nullable
+        // proposal-content columns directly to the EXISTING `quoting.quote_revision` table. This
+        // test's compiled binary/EF model always includes them (one process, one model, for its
+        // whole lifetime), so the real HTTP `POST /api/quotes` flow Stage 3 depends on below —
+        // its actual point, proving S6's NEW capability against PRESERVED S5 data through real
+        // CostEngine/PricingEngine resolution — needs those columns to physically exist, even
+        // though the S7 migration itself is deliberately never applied or recorded here. Adding
+        // just the columns (never the `documents` schema, never recorded in
+        // `__EFMigrationsHistory`) is the minimal, honest way to keep the compiled model and the
+        // database schema mutually usable without claiming S7 ran.
+        await AddS7QuoteRevisionColumnsAsync();
 
         // ================= Stage 3: REAL application bootstrap against the upgraded database =================
         Guid quoteId;

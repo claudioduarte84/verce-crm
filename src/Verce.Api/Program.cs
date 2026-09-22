@@ -60,10 +60,60 @@ builder.Services.Configure<Verce.Modules.Settings.BrandAssetStorageOptions>(opti
     options.StorageRoot = effectiveBrandAssetRoot);
 builder.Services.AddScoped<Verce.Modules.Settings.AppSettingValueReader>();
 builder.Services.AddScoped<Verce.Modules.Settings.BrandAssetStorage>();
+
+// ---- S7: Quote PDF V1 (ADR-0016) — content-addressed generated-document storage, mirroring
+// BrandAssets:StorageRoot's exact production-hardening shape one directory over. ----
+var configuredDocumentStorageRoot = builder.Configuration["Documents:StorageRoot"];
+if (builder.Environment.IsProduction()
+    && (string.IsNullOrWhiteSpace(configuredDocumentStorageRoot) || !Path.IsPathRooted(configuredDocumentStorageRoot)))
+{
+    throw new InvalidOperationException(
+        "Production Documents storage requires Documents:StorageRoot to be an explicit absolute durable path.");
+}
+var effectiveDocumentStorageRoot = configuredDocumentStorageRoot
+    ?? Path.Combine(AppContext.BaseDirectory, "data", "generated-documents");
+if (builder.Environment.IsProduction())
+{
+    try
+    {
+        Directory.CreateDirectory(effectiveDocumentStorageRoot);
+        var probePath = Path.Combine(effectiveDocumentStorageRoot, ".verce-write-probe-" + Guid.CreateVersion7().ToString("N"));
+        File.WriteAllBytes(probePath, []);
+        File.Delete(probePath);
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+    {
+        throw new InvalidOperationException(
+            "Production Documents:StorageRoot must exist or be creatable and writable before HTTP starts.", ex);
+    }
+}
+builder.Services.Configure<Verce.Modules.Documents.DocumentStorageOptions>(options =>
+    options.StorageRoot = effectiveDocumentStorageRoot);
+builder.Services.AddSingleton<Verce.Modules.Documents.IDocumentStorage, Verce.Modules.Documents.DocumentStorage>();
+builder.Services.AddScoped<Verce.Modules.Documents.QuotePdfService>();
+// mission §45: production always binds 30s (SECURITY §8); a test overrides
+// "Documents:RenderTimeoutSeconds" through the SAME configuration path to prove the timeout
+// contract deterministically, without ever actually waiting 30 real seconds.
+builder.Services.Configure<Verce.Modules.Documents.PdfRenderTimeoutOptions>(options =>
+{
+    var configuredSeconds = builder.Configuration.GetValue<double?>("Documents:RenderTimeoutSeconds");
+    if (configuredSeconds is { } seconds) options.Timeout = TimeSpan.FromSeconds(seconds);
+});
+// F-01 (S7 final-findings correction): a SEPARATE disposable process renders every PDF — this
+// singleton owns no long-lived browser of its own, only the configured timeout and the worker's
+// path. Still registered once as both the renderer AND the hosted service that runs its startup
+// health probe (Verce.Modules.Documents.PlaywrightHtmlToPdfRenderer's own doc comment); ASP.NET
+// Core resolves an IHostedService registered this way to the SAME singleton instance.
+builder.Services.AddSingleton<Verce.Modules.Documents.PlaywrightHtmlToPdfRenderer>();
+builder.Services.AddSingleton<Verce.Modules.Documents.IHtmlToPdfRenderer>(sp => sp.GetRequiredService<Verce.Modules.Documents.PlaywrightHtmlToPdfRenderer>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Verce.Modules.Documents.PlaywrightHtmlToPdfRenderer>());
 builder.Services.AddScoped<Verce.Modules.Costing.ICostingInventoryReader, Verce.Api.Costing.InventoryCostSourceReader>();
 builder.Services.AddHostedService<Verce.Modules.Settings.SettingsSeedService>();
 builder.Services.AddHostedService<Verce.Modules.Inventory.InventorySeedService>();
 builder.Services.AddHostedService<Verce.Modules.Pricing.PricingSeedService>();
+// ADR-0007 §7 (S7/S14 scope authority gate, OPTION A): seeds document_type + the default VERCE
+// proposal template as ordinary rows — never compiled renderer code.
+builder.Services.AddHostedService<Verce.Modules.Documents.DocumentsSeedService>();
 
 // ---- S6 (ADR-0020 §A.6/§A.8): the QuoteApproved/-Revised/-Canceled/-Expired synchronous
 // contract, handled by Production. Registered explicitly — there is no assembly-scanning
@@ -74,8 +124,12 @@ builder.Services.AddScoped<IDomainEventHandler<QuoteRevisedEvent>, MaintainHasPe
 builder.Services.AddScoped<IDomainEventHandler<QuoteCanceledEvent>, ClearHasPendingRevisionOnQuoteCanceled>();
 builder.Services.AddScoped<IDomainEventHandler<QuoteExpiredEvent>, ClearHasPendingRevisionOnQuoteExpired>();
 
-builder.Services.Configure<Verce.Modules.Quoting.ExpireQuotesJobOptions>(
-    builder.Configuration.GetSection("Quoting:Expiration"));
+// ADR-0012 §1/§12: the integration half of approval — dispatched only after commit, from the
+// outbox, so a slow/failed PDF render can never touch the approval transaction (S7/S14 scope
+// authority gate §12). Scoped, so the outbox dispatcher's per-cycle DI scope resolves a fresh
+// VerceDbContext, exactly like every other scoped service it invokes.
+builder.Services.AddScoped<Verce.Platform.Outbox.IIntegrationEventConsumer, Verce.Api.Quoting.GenerateQuotePdfRequestedConsumer>();
+
 builder.Services.AddScoped<Verce.Modules.Quoting.ExpireQuotesService>();
 builder.Services.AddVerceQuotingScheduling(builder.Configuration);
 
@@ -196,6 +250,7 @@ app.MapCostingEndpoints();
 app.MapProductEndpoints();
 app.MapPricingEndpoints();
 app.MapQuotingEndpoints();
+app.MapQuotePdfEndpoints();
 
 // ---- Health endpoints (ADR-0012 §25, OPERATIONS §9): status word only, anonymous ----
 app.MapGet("/health/live", () => Results.Text("healthy")).AllowAnonymous();

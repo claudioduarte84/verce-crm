@@ -377,7 +377,13 @@ Rules:
 - Generated files are stored outside the web root and served through an authorized endpoint
   that checks permission on the *source* entity, never by direct static path.
 - Render timeout 30 s; a failed render never blocks the business transaction (it runs from the
-  outbox).
+  outbox). **Every render runs in its own disposable OS process** (a worker executable this
+  service spawns and, on timeout, force-terminates with its entire process tree) — never a
+  browser instance shared across renders. The installed Playwright .NET API exposes no way to
+  cancel an in-flight render or reach the browser's own process handle, so a shared, long-lived
+  browser cannot be forcibly reset once a render hangs past its deadline; per-render process
+  isolation makes "the timed-out render is gone, the next render is unaffected" an OS-level
+  guarantee rather than a hope that the browser's own IPC recovers.
 - **Fonts are embedded or self-hosted**, never fetched from a CDN. Beyond reproducibility
   ([ADR-0016](architecture/ADR-0016-document-render-snapshots.md)), a remote font URL would be an
   outbound request from the renderer — exactly what the blocked network context prevents.

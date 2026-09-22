@@ -38,8 +38,20 @@ public sealed record QuoteItemRequest(
     Guid? SourceQuoteItemId, Guid? ProductId, string? AdHocDescription, decimal? ManualUnitCost, decimal Quantity,
     decimal DesiredMarginPercent, decimal? ManualPriceOverride, QuoteDiscountKind DiscountKind, decimal DiscountValue);
 
-public sealed record QuoteCreateRequest(Guid? CustomerId, Guid SalesChannelId, IReadOnlyList<QuoteItemRequest> Items, int? ValidityDaysOverride);
-public sealed record QuoteReviseRequest(Guid? CustomerId, Guid SalesChannelId, IReadOnlyList<QuoteItemRequest> Items, int? ValidityDaysOverride, long QuoteVersion);
+/// <summary>One <c>{label, value}</c> pair for <see cref="ProposalContentRequest.TechnicalHighlights"/>
+/// (DOMAIN-MODEL §8 rule 1 — deliberately generic, never a typed material/tolerance column).</summary>
+public sealed record TechnicalHighlightRequest(string Label, string Value);
+
+/// <summary>S7 proposal-content snapshot (ADR-0016 §7). Every field is optional. On create, an
+/// omitted <see cref="PaymentTerms"/>/<see cref="DeliveryTerms"/>/<see cref="Warranty"/> resolves
+/// once from <c>documents.default_*</c> Settings, inside the revision-creating transaction — never
+/// re-read later. On revise, an omitted field means "keep the value from the current revision",
+/// never "clear it"; to clear a field the caller sends an explicit empty string.</summary>
+public sealed record ProposalContentRequest(string? Title, string? Scope, IReadOnlyList<TechnicalHighlightRequest>? TechnicalHighlights,
+    string? TechnicalNotes, string? OutOfScope, string? PaymentTerms, string? DeliveryTerms, string? Warranty, string? Notes);
+
+public sealed record QuoteCreateRequest(Guid? CustomerId, Guid SalesChannelId, IReadOnlyList<QuoteItemRequest> Items, int? ValidityDaysOverride, ProposalContentRequest? ProposalContent = null);
+public sealed record QuoteReviseRequest(Guid? CustomerId, Guid SalesChannelId, IReadOnlyList<QuoteItemRequest> Items, int? ValidityDaysOverride, long QuoteVersion, ProposalContentRequest? ProposalContent = null);
 public sealed record QuoteCancelRequest(string Reason, long QuoteVersion);
 public sealed record QuoteVersionedRequest(long QuoteVersion);
 
@@ -68,17 +80,31 @@ public sealed record QuoteItemResponse(Guid Id, int LineNumber, Guid? SourceQuot
     decimal LineTotalAmount, decimal LineCostAmount, decimal LineFeeAmount, decimal ExpectedProfitAmount, decimal EffectiveMarginPercent,
     QuoteItemCostSnapshotResponse CostSnapshot);
 
+public sealed record TechnicalHighlightResponse(string Label, string Value);
+
+/// <summary>S7 proposal-content snapshot, as frozen on the revision at issue (ADR-0016 §7).
+/// <c>InternalNotes</c> is deliberately NOT included here — this response backs both the
+/// operator UI and (via the same shape) anything customer-adjacent, and internal notes have no
+/// binding in the QUOTE document catalogue.</summary>
+public sealed record ProposalContentResponse(string? Title, string? Scope, IReadOnlyList<TechnicalHighlightResponse> TechnicalHighlights,
+    string? TechnicalNotes, string? OutOfScope, string? PaymentTerms, string? DeliveryTerms, string? Warranty, string? Notes);
+
 public sealed record QuoteRevisionResponse(Guid Id, int RevisionIndex, string RevisionSuffix, string DisplayNumber,
     QuoteRevisionStatus Status, Guid SalesChannelId, DateTimeOffset IssuedAt, DateOnly ValidUntil,
     Guid? SupersededByRevisionId, Guid? SourceRevisionId, DateTimeOffset? ApprovedAt, Guid? ApprovedBy,
     decimal SubtotalAmount, decimal DiscountAmount, decimal TotalAmount, decimal TotalCostAmount,
-    decimal ExpectedProfitAmount, decimal EffectiveMarginPercent, IReadOnlyList<QuoteItemResponse> Items);
+    decimal ExpectedProfitAmount, decimal EffectiveMarginPercent, IReadOnlyList<QuoteItemResponse> Items,
+    ProposalContentResponse ProposalContent);
 
 public sealed record QuoteResponse(Guid Id, string Number, Guid? CustomerId, long Version,
-    QuoteRevisionResponse CurrentRevision, string CommercialOutcome, bool HasEverWon);
+    QuoteRevisionResponse CurrentRevision, string CommercialOutcome, bool HasEverWon, string? ProductionOrderStatus = null);
 
-public sealed record QuoteListItemResponse(Guid Id, string Number, Guid? CustomerId, QuoteRevisionStatus CurrentStatus,
-    decimal CurrentTotalAmount, string CommercialOutcome, long Version);
+/// <summary>S7 §5: the list surface an operator actually works from — current revision identity/
+/// status, commercial outcome, validity and (when one exists) the associated ProductionOrder's
+/// status, without requiring a second round trip to the detail endpoint.</summary>
+public sealed record QuoteListItemResponse(Guid Id, string Number, DateOnly NumberDate, Guid? CustomerId, string? CustomerName,
+    int CurrentRevisionIndex, string CurrentRevisionSuffix, QuoteRevisionStatus CurrentStatus, DateOnly ValidUntil,
+    decimal CurrentTotalAmount, string CommercialOutcome, string? ProductionOrderStatus, long Version);
 public sealed record QuoteListResponse(IReadOnlyList<QuoteListItemResponse> Items, int Page, int PageSize, int Total);
 
 public sealed record ConversionRatePeriodResponse(DateOnly PeriodStart, DateOnly PeriodEndExclusive, int Won, int Lost, int Decided, decimal? ConversionRate);
@@ -108,33 +134,105 @@ public static class QuotingEndpoints
     {
         var group = app.MapGroup("/api/quotes");
 
-        group.MapGet("", async (VerceDbContext db, IClock clock, CancellationToken ct, int page = 0, int pageSize = 0) =>
+        group.MapGet("", async (VerceDbContext db, IClock clock, CancellationToken ct, int page = 0, int pageSize = 0,
+            string? search = null, Guid? customerId = null, QuoteRevisionStatus? status = null, string? outcome = null,
+            bool? expired = null) =>
         {
             page = Math.Max(page, 1);
             pageSize = Math.Clamp(pageSize == 0 ? 25 : pageSize, 1, 100);
-            var quotes = await db.Set<Quote>().AsNoTracking()
-                .Include(x => x.Revisions).ThenInclude(x => x.History)
-                .OrderByDescending(x => x.NumberDate).ThenByDescending(x => x.NumberSequence)
-                .Skip((page - 1) * pageSize).Take(pageSize)
-                .ToListAsync(ct);
-            var total = await db.Set<Quote>().CountAsync(ct);
-            var items = quotes.Select(q =>
+            var organizationToday = clock.OrganizationToday();
+
+            // S7 §6: the current revision (identity/status/validity) is resolved via an explicit
+            // join on CurrentRevisionId, never the C#-only Quote.CurrentRevision property, so every
+            // filter below pushes down to SQL. hasEverWon is expressed as a correlated EXISTS
+            // rather than pulling the OutcomeCalculator's full period-reporting machinery into a
+            // per-row list query — the LIST view only ever needs the CURRENT (non-period)
+            // classification, exactly like ToResponse's own CurrentCommercialOutcome call.
+            var query =
+                from q in db.Set<Quote>().AsNoTracking()
+                join cr in db.Set<QuoteRevision>().AsNoTracking() on q.CurrentRevisionId equals cr.Id
+                select new
+                {
+                    Quote = q,
+                    Current = cr,
+                    HasEverWon = db.Set<QuoteRevision>().Where(r => r.QuoteId == q.Id)
+                        .Join(db.Set<QuoteStatusHistory>(), r => r.Id, h => h.QuoteRevisionId, (r, h) => h)
+                        .Any(h => h.ToStatus == QuoteRevisionStatus.APPROVED),
+                };
+
+            if (!string.IsNullOrWhiteSpace(search))
             {
-                var current = q.CurrentRevision;
-                var history = q.Revisions.SelectMany(r => r.History.Select(h => new QuoteHistoryEvent(h.ToStatus.ToString(), h.ChangedAt)));
-                var firstApprovalAt = QuoteOutcomeCalculator.FirstApprovalAt(history);
-                var outcome = QuoteOutcomeCalculator.CurrentCommercialOutcome(firstApprovalAt,
-                    current.Status is QuoteRevisionStatus.CANCELED or QuoteRevisionStatus.EXPIRED);
-                return new QuoteListItemResponse(q.Id, q.Number, q.CustomerId, current.Status, current.TotalAmount, outcome, q.Version);
-            }).ToList();
+                var pattern = $"%{search.Trim()}%";
+                query = query.Where(x => EF.Functions.ILike(x.Quote.Number, pattern)
+                    || (x.Quote.CustomerId != null && db.Set<Customer>().Any(c => c.Id == x.Quote.CustomerId && EF.Functions.ILike(c.Name, pattern))));
+            }
+            if (customerId is { } cid) query = query.Where(x => x.Quote.CustomerId == cid);
+            if (status is { } statusValue) query = query.Where(x => x.Current.Status == statusValue);
+            if (expired is { } expiredValue) query = query.Where(x => expiredValue ? x.Current.ValidUntil < organizationToday : x.Current.ValidUntil >= organizationToday);
+
+            // Outcome is expressed entirely in terms of already-projected, SQL-translatable
+            // columns (the correlated-EXISTS HasEverWon plus the current status) — pushed down as
+            // a WHERE clause exactly like every other filter, never materialized in memory first.
+            // An unrecognized outcome value matches nothing rather than silently ignoring the
+            // filter (mirrors every other query parameter's fail-closed behaviour).
+            if (outcome is not null)
+            {
+                query = outcome switch
+                {
+                    "WON" => query.Where(x => x.HasEverWon),
+                    "LOST" => query.Where(x => !x.HasEverWon && (x.Current.Status == QuoteRevisionStatus.CANCELED || x.Current.Status == QuoteRevisionStatus.EXPIRED)),
+                    "OPEN" => query.Where(x => !x.HasEverWon && x.Current.Status != QuoteRevisionStatus.CANCELED && x.Current.Status != QuoteRevisionStatus.EXPIRED),
+                    _ => query.Where(x => false),
+                };
+            }
+
+            query = query.OrderByDescending(x => x.Quote.NumberDate).ThenByDescending(x => x.Quote.NumberSequence);
+
+            var total = await query.CountAsync(ct);
+            var pageRows = await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+            var page1 = pageRows.Select(x => (x.Quote, x.Current, x.HasEverWon)).ToList();
+
+            var quoteIds = page1.Select(x => x.Quote.Id).ToList();
+            var customerIds = page1.Where(x => x.Quote.CustomerId is not null).Select(x => x.Quote.CustomerId!.Value).Distinct().ToList();
+            var customerNames = await db.Set<Customer>().AsNoTracking().Where(c => customerIds.Contains(c.Id))
+                .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+            var currentRevisionIds = page1.Select(x => x.Current.Id).ToList();
+            var productionStatuses = await db.Set<ProductionOrder>().AsNoTracking()
+                .Where(o => currentRevisionIds.Contains(o.QuoteRevisionId))
+                .ToDictionaryAsync(o => o.QuoteRevisionId, o => o.Status.ToString(), ct);
+
+            var items = page1.Select(x => new QuoteListItemResponse(
+                x.Quote.Id, x.Quote.Number, x.Quote.NumberDate, x.Quote.CustomerId,
+                x.Quote.CustomerId is { } id && customerNames.TryGetValue(id, out var name) ? name : null,
+                x.Current.RevisionIndex, x.Current.RevisionSuffix, x.Current.Status, x.Current.ValidUntil,
+                x.Current.TotalAmount, ComputeOutcome(x.HasEverWon, x.Current.Status),
+                productionStatuses.TryGetValue(x.Current.Id, out var prodStatus) ? prodStatus : null,
+                x.Quote.Version)).ToList();
             return Results.Ok(new QuoteListResponse(items, page, pageSize, total));
         }).RequireAuthorization(Permissions.QuotingRead).Produces<QuoteListResponse>();
 
         group.MapGet("/{id:guid}", async (Guid id, VerceDbContext db, CancellationToken ct) =>
         {
             var quote = await LoadQuoteAsync(db, id, ct);
-            return quote is null ? Results.NotFound() : Results.Ok(ToResponse(quote));
+            if (quote is null) return Results.NotFound();
+            // S7 §11: production summary is read-only display on the detail response — the SAME
+            // direct Production-table read the list endpoint already performs (composition root,
+            // CLAUDE.md rule 11), just for a single revision instead of a page of them.
+            var productionOrderStatus = await db.Set<ProductionOrder>().AsNoTracking()
+                .Where(o => o.QuoteRevisionId == quote.CurrentRevision.Id)
+                .Select(o => o.Status.ToString())
+                .FirstOrDefaultAsync(ct);
+            return Results.Ok(ToResponse(quote, productionOrderStatus));
         }).RequireAuthorization(Permissions.QuotingRead).Produces<QuoteResponse>().Produces(StatusCodes.Status404NotFound);
+
+        group.MapGet("/{id:guid}/revisions", async (Guid id, VerceDbContext db, CancellationToken ct) =>
+        {
+            var quote = await LoadQuoteAsync(db, id, ct);
+            if (quote is null) return Results.NotFound();
+            var revisions = quote.Revisions.OrderBy(r => r.RevisionIndex)
+                .Select(r => ToRevisionResponse(quote, r)).ToList();
+            return Results.Ok(revisions);
+        }).RequireAuthorization(Permissions.QuotingRead).Produces<IReadOnlyList<QuoteRevisionResponse>>().Produces(StatusCodes.Status404NotFound);
 
         group.MapGet("/conversion-rate", async (DateOnly from, DateOnly to, VerceDbContext db, IClock clock, CancellationToken ct) =>
         {
@@ -178,6 +276,9 @@ public static class QuotingEndpoints
             catch (ArgumentException ex) { return Problem(ex.Message, StatusCodeFor(ex.Message)); }
 
             var validityDays = await ResolveValidityDaysAsync(request.ValidityDaysOverride, settings, ct);
+            // ADR-0016 §7: terms default from Settings ONLY here, once, for a brand-new Quote's
+            // R1 — never re-read by any later render (S7/S14 scope authority gate §5, OPTION A).
+            var proposalContent = await ResolveCreateProposalContentAsync(request.ProposalContent, settings, ct);
 
             Quote? created = null;
             try
@@ -186,7 +287,7 @@ public static class QuotingEndpoints
                 {
                     var sequence = await SequentialNumberAllocator.AllocateAsync(db, SequentialNumberAllocator.QuoteSeries, organizationToday, token);
                     created = new Quote(sequence, organizationToday, customerSnapshot, request.SalesChannelId, itemSnapshots,
-                        validityDays, actor.Id, ambient.CorrelationId, clock.UtcNow);
+                        validityDays, proposalContent, actor.Id, ambient.CorrelationId, clock.UtcNow);
                     db.Add(created);
                 }, ct);
             }
@@ -239,6 +340,9 @@ public static class QuotingEndpoints
             catch (ArgumentException ex) { return Problem(ex.Message, StatusCodeFor(ex.Message)); }
 
             var validityDays = await ResolveValidityDaysAsync(request.ValidityDaysOverride, settings, ct);
+            // STATE-MACHINES §2 step 2: clone every proposal field verbatim from R(n), then apply
+            // only the caller's explicit changes. Settings are NEVER re-read here (ADR-0016 §7).
+            var proposalContent = ApplyProposalContentOverrides(currentQuote.CurrentRevision.ProposalContent, request.ProposalContent);
 
             try
             {
@@ -249,7 +353,7 @@ public static class QuotingEndpoints
                         .SingleOrDefaultAsync(x => x.Id == id, token) ?? throw new KeyNotFoundException();
                     if (quote.Version != request.QuoteVersion) throw new DbUpdateConcurrencyException();
                     quote.ConstructNextRevision(customerSnapshot, request.SalesChannelId, itemSnapshots, validityDays,
-                        organizationToday, actor.Id, ambient.CorrelationId, clock.UtcNow);
+                        proposalContent, organizationToday, actor.Id, ambient.CorrelationId, clock.UtcNow);
                 }, ct);
             }
             catch (KeyNotFoundException) { return Results.NotFound(); }
@@ -574,6 +678,59 @@ public static class QuotingEndpoints
             m.CostPolicy, m.UnitCostBaseUnit, m.CostBeforeWastage, m.WastageCost, m.CostAfterWastage, m.CurrentStockBaseUnitAtIssue, m.ExceededCurrentStockAtIssue)).ToArray(),
         source.AdditionalCosts.OrderBy(a => a.LineNumber).Select(a => new QuoteItemAdditionalCostSnapshotInput(a.Description, a.Amount)).ToArray());
 
+    /// <summary>Create-only: an omitted term resolves ONCE from <c>documents.default_*</c>
+    /// Settings — the one and only place S7 reads these keys. Any later render, and every
+    /// revise, reads the already-frozen revision instead (ADR-0016 §7, S7/S14 scope authority
+    /// gate §5 OPTION A).</summary>
+    private static async Task<ProposalContentInput> ResolveCreateProposalContentAsync(ProposalContentRequest? request, AppSettingValueReader settings, CancellationToken ct)
+    {
+        var paymentTerms = request?.PaymentTerms;
+        var deliveryTerms = request?.DeliveryTerms;
+        var warranty = request?.Warranty;
+        if (string.IsNullOrWhiteSpace(paymentTerms)) paymentTerms = NullIfEmpty(await SafeGetStringAsync(settings, "documents.default_payment_terms", ct));
+        if (string.IsNullOrWhiteSpace(deliveryTerms)) deliveryTerms = NullIfEmpty(await SafeGetStringAsync(settings, "documents.default_delivery_terms", ct));
+        if (string.IsNullOrWhiteSpace(warranty)) warranty = NullIfEmpty(await SafeGetStringAsync(settings, "documents.default_warranty", ct));
+
+        return new ProposalContentInput(request?.Title, request?.Scope, SerializeHighlights(request?.TechnicalHighlights),
+            request?.TechnicalNotes, request?.OutOfScope, paymentTerms, deliveryTerms, warranty, request?.Notes, null);
+    }
+
+    /// <summary>Revise-only: clones every field from the source revision, then overlays only the
+    /// fields the caller actually supplied (non-null in the request). Never touches Settings.</summary>
+    private static ProposalContentInput ApplyProposalContentOverrides(ProposalContentInput cloned, ProposalContentRequest? request)
+    {
+        if (request is null) return cloned;
+        return new ProposalContentInput(
+            request.Title ?? cloned.Title,
+            request.Scope ?? cloned.Scope,
+            request.TechnicalHighlights is not null ? SerializeHighlights(request.TechnicalHighlights) : cloned.TechnicalHighlightsJson,
+            request.TechnicalNotes ?? cloned.TechnicalNotes,
+            request.OutOfScope ?? cloned.OutOfScope,
+            request.PaymentTerms ?? cloned.PaymentTerms,
+            request.DeliveryTerms ?? cloned.DeliveryTerms,
+            request.Warranty ?? cloned.Warranty,
+            request.Notes ?? cloned.Notes,
+            cloned.InternalNotes);
+    }
+
+    private static string? SerializeHighlights(IReadOnlyList<TechnicalHighlightRequest>? highlights) =>
+        highlights is null or { Count: 0 } ? null : JsonSerializer.Serialize(highlights);
+
+    private static IReadOnlyList<TechnicalHighlightResponse> DeserializeHighlights(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try { return JsonSerializer.Deserialize<List<TechnicalHighlightResponse>>(json) ?? []; }
+        catch (JsonException) { return []; }
+    }
+
+    private static async Task<string?> SafeGetStringAsync(AppSettingValueReader settings, string key, CancellationToken ct)
+    {
+        try { return await settings.GetStringAsync(key, ct); }
+        catch (ArgumentException) { return null; }
+    }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
     /// <summary><c>quote.default_validity_days</c> (S2-seeded, default 15) — ADR-0004: "stored
     /// per revision so a settings change never moves an existing deadline."</summary>
     private static async Task<int> ResolveValidityDaysAsync(int? overrideDays, AppSettingValueReader settings, CancellationToken ct)
@@ -596,7 +753,7 @@ public static class QuotingEndpoints
             .Include(x => x.Revisions).ThenInclude(x => x.History)
             .SingleOrDefaultAsync(x => x.Id == id, ct)!;
 
-    internal static QuoteResponse ToResponse(global::Verce.Modules.Quoting.Quote quote)
+    internal static QuoteResponse ToResponse(global::Verce.Modules.Quoting.Quote quote, string? productionOrderStatus = null)
     {
         var current = quote.CurrentRevision;
         var history = quote.Revisions.SelectMany(r => r.History.Select(h => new QuoteHistoryEvent(h.ToStatus.ToString(), h.ChangedAt)));
@@ -604,7 +761,17 @@ public static class QuotingEndpoints
         var outcome = QuoteOutcomeCalculator.CurrentCommercialOutcome(firstApprovalAt,
             current.Status is QuoteRevisionStatus.CANCELED or QuoteRevisionStatus.EXPIRED);
 
-        var items = current.Items.OrderBy(i => i.LineNumber).Select(i => new QuoteItemResponse(
+        return new QuoteResponse(quote.Id, quote.Number, quote.CustomerId, quote.Version, ToRevisionResponse(quote, current), outcome,
+            QuoteOutcomeCalculator.HasEverWon(firstApprovalAt), productionOrderStatus);
+    }
+
+    /// <summary>S7 §12: shared by <see cref="ToResponse"/> (current revision only) and the
+    /// <c>/revisions</c> timeline endpoint (every revision, oldest first) — same fully-detailed
+    /// projection either way, since a historical revision is exactly as immutable/inspectable as
+    /// the current one (CLAUDE.md rule 6).</summary>
+    internal static QuoteRevisionResponse ToRevisionResponse(global::Verce.Modules.Quoting.Quote quote, global::Verce.Modules.Quoting.QuoteRevision revision)
+    {
+        var items = revision.Items.OrderBy(i => i.LineNumber).Select(i => new QuoteItemResponse(
             i.Id, i.LineNumber, i.SourceQuoteItemId, i.ProductId, i.ProductNameSnapshot, i.Description, i.Quantity, i.UnitTotalCost, i.CostEngineVersion,
             i.DesiredMarginPercent, i.SalesChannelId, i.FeeRuleVersionId, i.CommissionPercent, i.FixedFeeApplication, i.RawFixedFee,
             i.AllocatedOrderFee, i.FixedFeePerUnit, i.RoundingPolicyApplied, i.SuggestedUnitPrice, i.ManualPriceOverride, i.PriceOverridden,
@@ -621,14 +788,14 @@ public static class QuotingEndpoints
                 i.AdditionalCosts.OrderBy(a => a.LineNumber).Select(a => new QuoteItemAdditionalCostResponse(a.Description, a.Amount)).ToList())))
             .ToList();
 
-        var revisionResponse = new QuoteRevisionResponse(current.Id, current.RevisionIndex, current.RevisionSuffix,
-            quote.DisplayNumberFor(current), current.Status, current.SalesChannelId, current.IssuedAt, current.ValidUntil,
-            current.SupersededByRevisionId, current.SourceRevisionId, current.ApprovedAt, current.ApprovedBy,
-            current.SubtotalAmount, current.DiscountAmount, current.TotalAmount, current.TotalCostAmount,
-            current.ExpectedProfitAmount, current.EffectiveMarginPercent, items);
+        var proposalContent = new ProposalContentResponse(revision.Title, revision.Scope, DeserializeHighlights(revision.TechnicalHighlightsJson),
+            revision.TechnicalNotes, revision.OutOfScope, revision.PaymentTerms, revision.DeliveryTerms, revision.Warranty, revision.Notes);
 
-        return new QuoteResponse(quote.Id, quote.Number, quote.CustomerId, quote.Version, revisionResponse, outcome,
-            QuoteOutcomeCalculator.HasEverWon(firstApprovalAt));
+        return new QuoteRevisionResponse(revision.Id, revision.RevisionIndex, revision.RevisionSuffix,
+            quote.DisplayNumberFor(revision), revision.Status, revision.SalesChannelId, revision.IssuedAt, revision.ValidUntil,
+            revision.SupersededByRevisionId, revision.SourceRevisionId, revision.ApprovedAt, revision.ApprovedBy,
+            revision.SubtotalAmount, revision.DiscountAmount, revision.TotalAmount, revision.TotalCostAmount,
+            revision.ExpectedProfitAmount, revision.EffectiveMarginPercent, items, proposalContent);
     }
 
     private static async Task<bool> IsValidCsrf(HttpContext http, IAntiforgery antiforgery)
@@ -636,6 +803,13 @@ public static class QuotingEndpoints
         try { await antiforgery.ValidateRequestAsync(http); return true; }
         catch (AntiforgeryValidationException) { return false; }
     }
+
+    /// <summary>The CURRENT (non-period) commercial classification — mirrors
+    /// <see cref="QuoteOutcomeCalculator.CurrentCommercialOutcome"/> exactly, restated so the list
+    /// query's already-projected columns (hasEverWon, current status) can drive it without
+    /// re-deriving <c>firstApprovalAt</c> from a full history load per row.</summary>
+    private static string ComputeOutcome(bool hasEverWon, QuoteRevisionStatus currentStatus) =>
+        hasEverWon ? "WON" : currentStatus is QuoteRevisionStatus.CANCELED or QuoteRevisionStatus.EXPIRED ? "LOST" : "OPEN";
 
     private static IResult BadRequest() => Results.Problem(statusCode: 400, title: "Requisição inválida.");
     private static IResult Problem(string code, int status = StatusCodes.Status400BadRequest) =>

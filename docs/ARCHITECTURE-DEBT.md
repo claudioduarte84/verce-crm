@@ -64,6 +64,39 @@ row unresolved has not met its Definition of Done, and the reviewer should rejec
 | **H-009 A** | Quoting | **Commercial** conversion semantics: quotes reopened after a terminal state, quotes whose current revision returns to `GENERATED` | **Before S6** | S6 | **Decision recorded (S6 entry)** — [ADR-0020 §B](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md) + [DATA-DICTIONARY §4.1](DATA-DICTIONARY.md#41-conversion-rate-taxa-de-conversão); implementation owed by S6 |
 | **H-009 B** | Reporting | Conversion reporting: cohort labelling of incomplete periods, `null` handling | S12 | S12 | Open |
 | **H-010** | Energy / Costing | Energy tariff availability before the Energy module exists: S4–S9 must price energy from the seeded default tariff without hard-coding a value, and S10 must not retroactively change quotes priced earlier | **Before S4** | S4 | Open |
+| **H-011** | Documents | S7 was frozen to persist the default proposal as `document_type`/`document_template`/`document_template_version` DATA and render it through a generic block-tree walker over a closed binding catalogue (ADR-0007 §7, S7/S14 scope authority gate 2026-09-21). | **Before S14** | S14 | **Closed (S7 template-engine final pass)** — see note below |
+
+### Resolution note for H-011 (S7 template-engine final pass, 2026-09-21)
+
+An earlier S7 correction pass (`VERCE3D-S7-FINAL-AUTHORITY-CORRECTION-MACRO-001`) fixed the
+concrete defects an independent review found — terms/proposal content frozen at issue,
+`GeneratedDocument` identity, the outbox render path, pagination proofs — but left the compiled
+`QuotePdfHtmlTemplate` renderer in place and opened this row to defer the persisted template
+engine to S14. Mission `VERCE3D-S7-TEMPLATE-ENGINE-FINAL-PASS-001` overruled that deferral as
+contrary to the frozen S7/S14 scope authority decision and built the engine within S7:
+
+- `documents.document_type` / `documents.document_template` / `documents.document_template_version`
+  now persist the default proposal as data (`DocumentType`, `DocumentTemplate`,
+  `DocumentTemplateVersion` in `Verce.Modules.Documents`), seeded idempotently by
+  `DocumentsSeedService` on startup, matching the established `IHostedService` seeding
+  convention.
+- `QuoteBindingCatalogue` is a closed, structurally enforced binding surface for the `QUOTE`
+  document type; unknown paths are rejected both by `QuoteRenderContext.ResolveScalar` at render
+  time and by `DocumentTemplateValidator` at template-publish time — proven by
+  `QuoteBindingCatalogueTests`.
+- `BlockTreeRenderer` is a generic block-tree walker (zero Quoting-specific knowledge; it depends
+  only on the `IRenderContext` interface) covering all 9 required block families, the closed
+  `visibleWhen` predicate grammar (`VisibleWhenEvaluator`, depth-3 limit), and a genuinely
+  repeating page header/footer via Playwright's native `headerTemplate`/`footerTemplate`
+  mechanism — proven against real multi-page Chromium+PdfPig output in
+  `QuotePdfPaginationTests.AssertDocumentHeaderRepeatsOnEveryPage`.
+- `QuotePdfHtmlTemplate.cs` (the compiled renderer) is deleted; `QuotePdfService` now resolves
+  the published default `DocumentTemplateVersion` and renders through `BlockTreeRenderer`
+  exclusively.
+
+S14 therefore starts from the persistence/binding-catalogue/block-renderer infrastructure already
+in place and is scoped to the **authoring UI only**, as ADR-0007 §6 originally assumed — the
+larger S14 scope this row previously flagged no longer applies.
 
 ### Resolution note for H-004 and H-005 (S5)
 
@@ -228,7 +261,6 @@ the product asks for them.
 | Item | Needed by | Impact if still missing |
 |---|---|---|
 | `VERCE_Proposta-Modelo_1.pdf` | **S7** | The default proposal's structure is fully specified; only the visual tokens (palette, typography, spacing, logo lockup) are pending — see [DEFAULT-PROPOSAL-TEMPLATE §0 and §8](DEFAULT-PROPOSAL-TEMPLATE.md) |
-| Font licensing for document embedding | **S7** | Typeface choice cannot be finalized; renderer requires embedded/self-hosted fonts |
 | Smart-plug device selection | **S10** | `IEnergyProvider` exists; no vendor code may be written before the device is chosen |
 | Confirmation of marketplace fee structures (Shopee, Mercado Livre) | **S8** | Determines whether `PER_UNIT` remains the correct default and whether brackets are needed |
 | The external gate report as a file | informational | Deadlines in §1 are now **authoritative**, taken from the re-gate mission text; a report file would only add rationale |

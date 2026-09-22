@@ -35,6 +35,7 @@ export function HomePage() {
           <p>Gerencie os primeiros cadastros que sustentam o seu trabalho.</p>
           <nav className="quick-links" aria-label="Módulos disponíveis">
             <Link to="/customers">Clientes</Link>
+            <Link to="/quotes">Orçamentos</Link>
             <Link to="/supplies">Suprimentos e estoque</Link>
             <Link to="/cost-laboratory">Laboratório de Custos</Link>
             <Link to="/products">Produtos e receitas</Link>

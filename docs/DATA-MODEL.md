@@ -683,14 +683,26 @@ RETURNING last_sequence;
 > described an earlier architecture-phase sketch (`number_text`, a computed `display_number`
 > column, a single `customer_snapshot jsonb`, and a set of proposal-document fields — `notes`,
 > `title`, `scope`, `technical_highlights`, `payment_terms`, `delivery_terms`, `warranty`,
-> `calculation_engine_version` on the revision itself) that materially disagrees with the actually
-> shipped S6 migration/model. The tables below now document the REAL physical schema — the
+> `calculation_engine_version` on the revision itself) that materially disagreed with the actually
+> shipped S6 migration/model. The tables below document the REAL physical schema — the
 > migration (`20260920200219_AddS6QuotingAndProductionCore`) and the EF model are the source of
 > truth for naming/layout, [ADR-0020](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md)
-> remains the source of truth for semantics. The proposal-document fields never existed in S6;
-> a future document-rendering sprint that needs them would add its own snapshot table (mirroring
-> [ADR-0016](architecture/ADR-0016-document-render-snapshots.md)'s pattern), never retrofit them
-> onto `quote_revision`.
+> remains the source of truth for semantics.
+>
+> **F-06 correction, part 2 (S7/S14 scope authority gate, 2026-09-21).** The final sentence above
+> — "a future document-rendering sprint... would add its own snapshot table, never retrofit them
+> onto `quote_revision`" — was itself wrong: it misread [ADR-0016 §7](architecture/ADR-0016-document-render-snapshots.md),
+> which is explicit that `payment_terms`, `delivery_terms` and `warranty` "default from settings
+> but are **copied onto the quote revision** at issue" — i.e. onto `quote_revision` itself, the
+> same table ADR-0003 already uses for every other frozen commercial value
+> (`product_name_snapshot`, the customer snapshot columns). [DOMAIN-MODEL §8](DOMAIN-MODEL.md#8-quoting-module)
+> and [DEFAULT-PROPOSAL-TEMPLATE §5](DEFAULT-PROPOSAL-TEMPLATE.md#5-content-sources) agree. S7
+> adds exactly these nine nullable columns to `quoting.quote_revision` (migration
+> `20260921101926_AddS7QuotePdfDocuments`): `title`, `scope`, `technical_highlights` (jsonb array
+> of `{label, value}`), `technical_notes`, `out_of_scope`, `payment_terms`, `delivery_terms`,
+> `warranty`, `notes` — plus `internal_notes` (never bound in any document catalogue). All are
+> frozen at revision construction ("issue") and never re-read from Settings afterward; on revise
+> they clone verbatim from the source revision unless the caller explicitly changes them.
 
 ### `quoting.quote`
 | Column | Type | Notes |
@@ -734,7 +746,23 @@ RETURNING last_sequence;
 | total_cost_amount | numeric(18,2) | not null |
 | expected_profit_amount | numeric(18,2) | not null |
 | effective_margin_percent | numeric(9,6) | not null |
+| title | text(200) | null — S7, proposal content, frozen at issue |
+| scope | text(4000) | null — S7, proposal content, frozen at issue |
+| technical_highlights | jsonb | null — S7, array of `{label, value}` (DOMAIN-MODEL §8 rule 1: deliberately generic, never a typed material/tolerance column) |
+| technical_notes | text(4000) | null — S7, proposal content, frozen at issue |
+| out_of_scope | text(4000) | null — S7, proposal content, frozen at issue |
+| payment_terms | text(2000) | null — S7; defaults from `documents.default_payment_terms` **only on create**, then frozen (ADR-0016 §7) |
+| delivery_terms | text(2000) | null — S7; defaults from `documents.default_delivery_terms` **only on create**, then frozen |
+| warranty | text(2000) | null — S7; defaults from `documents.default_warranty` **only on create**, then frozen |
+| notes | text(4000) | null — S7, customer-facing note, bound in the `QUOTE` catalogue as `quote.notes` |
+| internal_notes | text(4000) | null — S7, operator-only; deliberately absent from every document binding catalogue |
 | created_at / created_by / updated_at / updated_by | timestamptz / uuid | application metadata |
+
+S7's proposal-content columns are all optional and, like every other revision field, immutable
+once the revision is persisted: frozen in the SAME transaction as revision construction ("issue" —
+STATE-MACHINES §2), never re-read from Settings by any later render (S7/S14 scope authority gate
+§5, OPTION A). On revise, every field clones verbatim from the source revision unless the caller
+supplies an explicit override (STATE-MACHINES §2 step 2/4).
 
 The customer identity is frozen as SEPARATE scalar/jsonb snapshot columns (ADR-0003) — never a
 single combined `customer_snapshot jsonb`. There is no persisted `display_number`: it is computed
@@ -848,10 +876,23 @@ One row per recipe additional-cost line (e.g. packaging), frozen the same way.
 `reason text null`, `notes text null`.
 **IX** `(quote_revision_id, changed_at)`.
 
-### `quoting.quote_document`
+### `quoting.quote_document` — planned (not yet built)
 `id` **PK**, `quote_revision_id` **FK**, `generated_document_id uuid` **FK**,
 `document_type_code text`, `is_current boolean`.
 **U** partial `(quote_revision_id, document_type_code) WHERE is_current`.
+
+> **S7 note (2026-09-21, corrected 2026-09-21 by the S7/S14 scope authority gate).** S7 does not
+> create this join table. It ships the ADR-0016 §5 semantic directly on `documents.generated_document`
+> instead (see §13): `render_request_id` is the row identity (ADR-0012 §22 idempotency key — a
+> retried request converges, a deliberate re-render always inserts a new row), and a partial
+> unique index on `(source_id, document_kind) WHERE is_current` guarantees at most one CURRENT
+> document per revision at a time, with every earlier row retained and retrievable. A
+> `GeneratedDocument` is found by querying that table with the QuoteRevision's own id, with no
+> separate join row. (An earlier version of this note described a now-rejected `(source_id,
+> document_kind, template_version)` unique identity — DATA-DICTIONARY names exactly that key as
+> the trap that would block a legitimate re-issue; it was never shipped.) This table remains a
+> genuine future option (e.g. if a revision ever needs
+> more than one *kind* of current document) but nothing in S7 requires it.
 
 ---
 
@@ -988,70 +1029,83 @@ reconciled with actual consumption ([ADR-0006](architecture/ADR-0006-estimated-v
 
 ## 13. `documents` schema
 
-### `documents.document_type` — lookup
-`code text` **PK** (`QUOTE`, `PRODUCTION_ORDER`, `SHIPPING_LABEL`), `name`, `is_active`.
+> **S7 template-engine final pass (2026-09-21).** An earlier S7 correction pass fixed
+> `documents.generated_document`'s identity (`render_request_id`, ADR-0012 §22, replacing the
+> defective `UNIQUE (source_id, document_kind, template_version)` an independent review found)
+> but left the default proposal rendered by a compiled C# string builder, with `document_type`,
+> `document_template` and `document_template_version` undocumented as an "S14 sketch." Per the
+> S7/S14 scope authority gate's OPTION A decision, this pass built that persisted template engine
+> **within S7**: the four tables below are the actual, current schema — not a sketch — and the
+> compiled renderer (`QuotePdfHtmlTemplate`) no longer exists. S14's remaining scope is the
+> **authoring UI only** (draft → publish workflow); every table, the binding catalogue, the
+> generic block-tree renderer and the seeded default proposal already exist.
 
-### `documents.document_template` — **SD**
-`id` **PK**, `document_type_code text` **FK**, `name text`, `is_default boolean`,
-`is_active`, `deleted_at`.
-**U** partial `(document_type_code) WHERE is_default AND deleted_at IS NULL`.
+### `documents.document_type` — reference data
+`code text` **PK** (`QUOTE` shipped and default-templated in S7; `PRODUCTION_ORDER` and
+`SHIPPING_LABEL` identity rows seeded for future sprints), `name text`, `is_active boolean`.
+
+### `documents.document_template` — **SD**, master data
+`id uuid` **PK** (v7), `document_type_code text` **FK** restrict, `name text`,
+`is_default boolean`, `is_active boolean`, `deleted_at`, application metadata
+(`created_at`/`created_by`/`updated_at`/`updated_by`/`version`).
+- **U** partial `ix_document_template_default_per_type` on `document_type_code
+  WHERE is_default AND deleted_at IS NULL` — at most one default template per type.
 
 ### `documents.document_template_version`
-`id` **PK**, `document_template_id` **FK** cascade, `version_number int`,
-`status text` **CHECK** (`DRAFT|PUBLISHED|ARCHIVED`), `schema_version int not null`,
-`definition jsonb not null` (block tree + `theme` tokens), `page_setup jsonb not null`
-(size, orientation, margins, header/footer `repeatOn`), `published_at`, `published_by`, `notes`.
-- **U** `(document_template_id, version_number)`.
-- **U** partial `(document_template_id) WHERE status = 'DRAFT'` — at most one open draft.
+`id uuid` **PK** (v7), `document_template_id` **FK** cascade, `version_number int`,
+`status text` **CHECK** `ck_document_template_version_status` (`DRAFT|PUBLISHED|ARCHIVED`),
+`schema_version int not null`, `definition jsonb not null` (the block tree + `theme` tokens),
+`page_setup jsonb not null` (size, margins, header/footer `repeatOn`), `published_at`,
+`published_by`, application metadata.
+- **U** `ix_document_template_version_document_template_id_version_numb` on
+  `(document_template_id, version_number)`.
+- **U** partial `ix_document_template_version_one_open_draft` on `document_template_id
+  WHERE status = 'DRAFT'` — at most one open draft (no draft/publish workflow exists yet to
+  create one — S7 always mints version 1 already `PUBLISHED`, at seed time).
 
-Every binding path inside `definition` is validated against the document type's catalogue at
-publish time ([ADR-0007 §3](architecture/ADR-0007-document-template-engine.md)). A `PUBLISHED`
-row is immutable.
+Every binding path inside `definition` is validated against the document type's closed catalogue
+(`QuoteBindingCatalogue` for `QUOTE`) at construction time
+([ADR-0007 §3](architecture/ADR-0007-document-template-engine.md),
+`DocumentTemplateValidator`). A `PUBLISHED` row is immutable — the entity exposes no mutation
+method at all (proven structurally, not just by convention, in `DocumentTemplateTests`).
 
-### `documents.generated_document` — historical evidence
+### `documents.generated_document`
 | Column | Type | Notes |
 |---|---|---|
-| id | uuid | **PK** |
-| document_type_code | text | **FK** |
-| source_type | text | `QUOTE_REVISION`, `PRODUCTION_ORDER`, … |
-| source_id | uuid | not null |
-| purpose | text | **CHECK** `PREVIEW` / `ISSUED` |
-| render_request_id | uuid | not null **U** — outbox idempotency key ([ADR-0012 §13](architecture/ADR-0012-domain-events-and-outbox.md#22-consumer-idempotency)) |
-| document_template_version_id | uuid | **FK** restrict |
-| pdf_path | text | content-addressed |
-| pdf_sha256 | char(64) | not null |
-| pdf_size_bytes | bigint | not null |
-| rendered_html_path | text | null (content-addressed) |
-| rendered_html_sha256 | char(64) | null |
-| render_data_snapshot | jsonb | **not null** — the fully resolved render context |
-| brand_asset_version_ids | uuid[] | resolved at render time |
-| generated_at | timestamptz | not null |
-| generated_by | uuid | null |
-| issued_at | timestamptz | null |
-| sent_at | timestamptz | null |
-| render_duration_ms | int | not null |
-| chromium_version | text | not null |
+| id | uuid | **PK** (UUID v7) |
+| render_request_id | uuid | not null **U** — ADR-0012 §22 idempotency key, minted once per deliberate render request (at approval, or at an operator's explicit generate/reissue click); a retried delivery of the SAME request converges here, a deliberate re-render mints a new one |
+| document_type_code | text | not null **FK** restrict → `document_type.code` |
+| source_type | text | not null (`QUOTE_REVISION` today) |
+| source_id | uuid | not null — plain ID reference to the source aggregate, no FK across modules (CLAUDE.md rule 11) |
+| document_template_version_id | uuid | not null **FK** restrict → `document_template_version.id` — the exact immutable layout used, frozen forever (ADR-0016 §1) |
+| purpose | text | not null **CHECK** `ck_generated_document_purpose` (`PREVIEW`/`ISSUED`) — always `ISSUED` today; `PREVIEW` generation is not wired up yet |
+| is_current | boolean | not null — the most recent row for `(source_type, source_id, document_type_code)`; the ONLY field ever mutated on an existing row (`MarkSuperseded()`, ADR-0016 §5) |
+| render_data_snapshot_json | jsonb | not null — the frozen `QuotePdfInput` (company/brand/proposal-content snapshot, resolved once per render, never re-read afterward) |
+| html_sha256 / html_storage_key | text | not null — content-addressed HTML alongside the PDF |
+| pdf_sha256 / pdf_storage_key | text | not null |
+| pdf_size_bytes | bigint | not null **CHECK** `ck_generated_document_pdf_size_positive` (`> 0`) |
+| chromium_version | text | null |
 | render_engine_version | text | not null |
-| is_current | boolean | not null |
+| brand_asset_version_ids | uuid[] | not null — every distinct `BrandAssetVersion` actually used (header AND footer logo roles may differ); never a scalar |
+| generated_by_user_id | uuid | null (null for an outbox-driven render — no interactive actor) |
+| issued_at | timestamptz | not null |
+| reissue_reason | text | null — the operator-typed "why" for an explicit re-issue (ADR-0016 §5); null for a first-ever render |
+| created_at / created_by / updated_at / updated_by | timestamptz / uuid | application metadata |
+| version | bigint | optimistic concurrency token |
 
-- **IX** `(source_type, source_id, generated_at desc)`.
-- **IX** partial `(generated_at) WHERE purpose = 'PREVIEW'` — the pruning job.
-- **U** partial `(source_type, source_id, document_type_code) WHERE is_current`.
-- **U** `(render_request_id)`.
-- **IX** `(pdf_sha256)`.
+- **U** on `render_request_id` — the real idempotency identity (ADR-0012 §22); a concurrent race
+  on the SAME request converges under an advisory lock keyed `(source_id, document_type_code)`,
+  the loser reading back the winner's row.
+- **U** partial `ix_generated_document_current_per_source` on
+  `(source_type, source_id, document_type_code) WHERE is_current` — at most one current document
+  at a time, enforced by Postgres itself.
+- **IX** on `document_template_version_id`.
 
-The consumer inserts with `ON CONFLICT (render_request_id) DO NOTHING`, so a retried outbox
-delivery cannot create a second `ISSUED` document. The key identifies the **request**, not the
-content: a retry reuses it and deduplicates, while a deliberate re-issue is a new request and
-correctly produces a new document, even against the same template version.
-
-Rules enforced by [ADR-0016](architecture/ADR-0016-document-render-snapshots.md): rows with
-`purpose = 'ISSUED'` are **append-only — never updated, never deleted**; re-rendering inserts a
-new row; `PREVIEW` rows are prunable after `documents.preview_retention_days`.
-
-Files live in `IDocumentStorage` (local filesystem in v1) at
-`{sha256[0:2]}/{sha256}.{ext}`, so identical renders deduplicate and no filename derives from
-user input. **Files are never deleted in v1** — historical integrity over storage optimization.
+No file is ever deleted. Files live in `IDocumentStorage` (local filesystem, content-addressed at
+`{sha256[0:2]}/{sha256}.{ext}`) so identical renders deduplicate and no filename derives from
+user input; `Documents:StorageRoot` is a dedicated persistent volume in production
+(`verce_documents`, see [OPERATIONS §4.2](OPERATIONS.md#42-document-storage-consistency)),
+mirroring brand-asset storage's exact consistency model.
 
 ---
 
@@ -1155,8 +1209,8 @@ Deliberate exceptions:
 | `inventory.supply_category` | Consumíveis, Componentes, Embalagens, Etiquetas, Acessórios |
 | `inventory.filament_material` | PLA, PETG, TPU, ABS, ASA |
 | `finance.expense_category` | the ten categories in DOMAIN-MODEL §11 |
-| `documents.document_type` | QUOTE, PRODUCTION_ORDER, SHIPPING_LABEL |
-| `documents.document_template` (+ version 1, `PUBLISHED`) | **`VERCE \| Proposta Comercial Padrão`**, `is_default` for `QUOTE` (S7) — see [DEFAULT-PROPOSAL-TEMPLATE](DEFAULT-PROPOSAL-TEMPLATE.md) |
+| `documents.document_type` | `QUOTE`, `PRODUCTION_ORDER`, `SHIPPING_LABEL` (`DocumentsSeedService`) |
+| `documents.document_template` (+ version 1, `PUBLISHED`) | the default `VERCE \| Proposta Comercial Padrão` — the exact block tree/page-setup/theme specified in [DEFAULT-PROPOSAL-TEMPLATE](DEFAULT-PROPOSAL-TEMPLATE.md), seeded as ordinary data (`DefaultProposalTemplateSeedData`), validated at seed time by the same `DocumentTemplateValidator` a future S14 publish action will use |
 | `platform.role` | `Owner`, `Operator`, `Viewer` — **roles only** |
 
 > **No user is ever seeded.** No default account, no default password, no `admin/admin`. The

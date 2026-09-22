@@ -146,6 +146,20 @@ and header/footer regions with `repeatOn ∈ { ALL, ALL_EXCEPT_FIRST, FIRST_ONLY
 The reference proposal happening to fit one page is a property of that content, never of the
 architecture.
 
+**`repeatOn = ALL` is native** — Playwright's `headerTemplate`/`footerTemplate` repeat the SAME
+template on every page by construction, no extra work needed. **`FIRST_ONLY` and
+`ALL_EXCEPT_FIRST` are not** — verified against the installed Chromium/Playwright print API,
+there is no per-page-conditional hook in the header/footer template mechanism; it can only ever
+render one static template, identically, on every page of a given print pass. The renderer
+(`BlockTreeRenderer.RenderDocumentAsync`) implements these two modes with two independent
+Chromium print passes of the SAME body content — one with the page-1 header/footer
+configuration, one with the subsequent-pages configuration — and splices page 1 of the first
+pass onto pages 2..N of the second into a single output PDF. This uses PDFsharp (MIT-licensed,
+`docs.pdfsharp.net`) strictly to import whole existing pages from one Chromium-rendered PDF into
+another; it never generates or edits page content. When both regions use `ALL`/`NONE` only (the
+default proposal's own configuration), exactly one print pass runs — the two-pass path is
+reserved for `FIRST_ONLY`/`ALL_EXCEPT_FIRST` specifically, not a general-purpose cost of pagination.
+
 ### 3.4 Logo blocks
 
 A `Logo` block stores intent — `INHERIT_DEFAULT`, `SPECIFIC_ASSET` (with a `brand_asset_id`), or

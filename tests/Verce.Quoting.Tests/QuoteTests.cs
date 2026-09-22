@@ -44,7 +44,7 @@ public class QuoteTests
 
     private static Quote NewQuote(IReadOnlyList<QuoteItemSnapshot>? items = null) =>
         new(1, Today, new CustomerSnapshotInput(null, null, null, null, null), ChannelId,
-            items ?? [Item()], 15, null, CorrelationId, Now);
+            items ?? [Item()], 15, ProposalContentInput.Empty, null, CorrelationId, Now);
 
     [Fact]
     public void Construction_creates_revision_1_as_GENERATED_with_no_suffix()
@@ -66,7 +66,7 @@ public class QuoteTests
         var originalTotal = original.TotalAmount;
 
         quote.ConstructNextRevision(new CustomerSnapshotInput(null, null, null, null, null), ChannelId,
-            [Item(unitCost: 999m)], 15, Today, null, CorrelationId, Now);
+            [Item(unitCost: 999m)], 15, ProposalContentInput.Empty, Today, null, CorrelationId, Now);
 
         original.TotalAmount.Should().Be(originalTotal); // field-for-field historical
         original.Items.Single().UnitTotalCost.Should().Be(10m);
@@ -78,7 +78,7 @@ public class QuoteTests
         var quote = NewQuote();
         var r1 = quote.CurrentRevision;
         var r2 = quote.ConstructNextRevision(new CustomerSnapshotInput(null, null, null, null, null), ChannelId,
-            [Item()], 15, Today, null, CorrelationId, Now);
+            [Item()], 15, ProposalContentInput.Empty, Today, null, CorrelationId, Now);
 
         r1.SupersededByRevisionId.Should().Be(r2.Id);
         r1.Status.Should().Be(QuoteRevisionStatus.SUPERSEDED); // was GENERATED (non-terminal)
@@ -95,7 +95,7 @@ public class QuoteTests
         var quote = NewQuote();
         quote.Approve(null, CorrelationId, Now, Today, allowDirectApproval: true);
         var act = () => quote.ConstructNextRevision(new CustomerSnapshotInput(null, null, null, null, null), ChannelId,
-            [Item()], 15, Today, null, CorrelationId, Now);
+            [Item()], 15, ProposalContentInput.Empty, Today, null, CorrelationId, Now);
         act.Should().NotThrow();
     }
 
@@ -107,7 +107,7 @@ public class QuoteTests
         var approved = quote.CurrentRevision;
 
         quote.ConstructNextRevision(new CustomerSnapshotInput(null, null, null, null, null), ChannelId,
-            [Item()], 15, Today, null, CorrelationId, Now);
+            [Item()], 15, ProposalContentInput.Empty, Today, null, CorrelationId, Now);
 
         approved.Status.Should().Be(QuoteRevisionStatus.APPROVED); // never SUPERSEDED
         approved.SupersededByRevisionId.Should().NotBeNull(); // but the pointer IS set
@@ -197,7 +197,7 @@ public class QuoteTests
     public void Construction_rejects_a_non_positive_validity_days_value(int validityDays)
     {
         var act = () => new Quote(1, Today, new CustomerSnapshotInput(null, null, null, null, null), ChannelId,
-            [Item()], validityDays, null, CorrelationId, Now);
+            [Item()], validityDays, ProposalContentInput.Empty, null, CorrelationId, Now);
         act.Should().Throw<ArgumentException>().WithMessage("QUOTE_VALIDITY_DAYS_INVALID");
     }
 
@@ -209,7 +209,7 @@ public class QuoteTests
     public void Construction_accepts_any_positive_validity_days_value_that_DateOnly_can_represent(int validityDays)
     {
         var quote = new Quote(1, Today, new CustomerSnapshotInput(null, null, null, null, null), ChannelId,
-            [Item()], validityDays, null, CorrelationId, Now);
+            [Item()], validityDays, ProposalContentInput.Empty, null, CorrelationId, Now);
         quote.CurrentRevision.ValidUntil.Should().Be(Today.AddDays(validityDays));
     }
 
@@ -218,7 +218,7 @@ public class QuoteTests
     {
         var maxRepresentableDays = DateOnly.MaxValue.DayNumber - Today.DayNumber;
         var quote = new Quote(1, Today, new CustomerSnapshotInput(null, null, null, null, null), ChannelId,
-            [Item()], maxRepresentableDays, null, CorrelationId, Now);
+            [Item()], maxRepresentableDays, ProposalContentInput.Empty, null, CorrelationId, Now);
         quote.CurrentRevision.ValidUntil.Should().Be(DateOnly.MaxValue);
     }
 
@@ -230,7 +230,7 @@ public class QuoteTests
         var maxRepresentableDays = DateOnly.MaxValue.DayNumber - Today.DayNumber;
         var unrepresentableValidityDays = daysPastMaxRepresentable == int.MaxValue ? int.MaxValue : maxRepresentableDays + daysPastMaxRepresentable;
         var act = () => new Quote(1, Today, new CustomerSnapshotInput(null, null, null, null, null), ChannelId,
-            [Item()], unrepresentableValidityDays, null, CorrelationId, Now);
+            [Item()], unrepresentableValidityDays, ProposalContentInput.Empty, null, CorrelationId, Now);
         act.Should().Throw<ArgumentException>().WithMessage("QUOTE_VALIDITY_DAYS_INVALID");
     }
 
@@ -240,7 +240,7 @@ public class QuoteTests
         var quote = NewQuote();
         quote.ExpireCurrentRevision(CorrelationId, Now, Today.AddDays(20));
         var revived = quote.ConstructNextRevision(new CustomerSnapshotInput(null, null, null, null, null), ChannelId,
-            [Item()], 15, Today.AddDays(20), null, CorrelationId, Now);
+            [Item()], 15, ProposalContentInput.Empty, Today.AddDays(20), null, CorrelationId, Now);
         revived.Status.Should().Be(QuoteRevisionStatus.GENERATED);
         quote.CurrentRevision.Should().BeSameAs(revived);
     }

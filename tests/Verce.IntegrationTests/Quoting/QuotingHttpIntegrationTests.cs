@@ -194,6 +194,47 @@ public sealed class QuotingHttpIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Getting_a_quote_by_id_reports_the_current_revisions_production_order_status()
+    {
+        var (owner, _) = await LoggedInAsAsync(Roles.Owner);
+        var quote = await CreateSimpleAdHocQuoteAsync(owner);
+
+        var beforeApproval = await ReadAsync<QuoteResponse>(await owner.GetAsync($"/api/quotes/{quote.Id}"));
+        beforeApproval.ProductionOrderStatus.Should().BeNull("no ProductionOrder exists until the quote is approved");
+
+        var approved = await ReadAsync<QuoteResponse>(await owner.PostAsync($"/api/quotes/{quote.Id}/approve", new QuoteVersionedRequest(quote.Version)));
+
+        var afterApproval = await ReadAsync<QuoteResponse>(await owner.GetAsync($"/api/quotes/{quote.Id}"));
+        afterApproval.ProductionOrderStatus.Should().Be(ProductionOrderStatus.QUEUED.ToString());
+        approved.ProductionOrderStatus.Should().BeNull("the approve response itself never looks up Production — only GET by id does");
+    }
+
+    [Fact]
+    public async Task Revisions_endpoint_returns_every_revision_oldest_first_with_full_detail_and_marks_supersession()
+    {
+        var (owner, _) = await LoggedInAsAsync(Roles.Owner);
+        var quote = await CreateSimpleAdHocQuoteAsync(owner);
+        var r1 = await ReadAsync<QuoteResponse>(await owner.PostAsync($"/api/quotes/{quote.Id}/approve", new QuoteVersionedRequest(quote.Version)));
+        var r2 = await ReadAsync<QuoteResponse>(await owner.PostAsync($"/api/quotes/{quote.Id}/revise",
+            new QuoteReviseRequest(null, r1.CurrentRevision.SalesChannelId,
+                [new QuoteItemRequest(null, null, "Linha única", 10.00m, 1m, 0.35m, null, QuoteDiscountKind.None, 0m)], null, r1.Version)));
+
+        var revisions = await ReadAsync<List<QuoteRevisionResponse>>(await owner.GetAsync($"/api/quotes/{quote.Id}/revisions"));
+
+        revisions.Should().HaveCount(2);
+        revisions[0].Id.Should().Be(r1.CurrentRevision.Id);
+        revisions[0].RevisionIndex.Should().Be(1);
+        revisions[0].Status.Should().Be(QuoteRevisionStatus.APPROVED, "an APPROVED revision is terminal — revising afterwards links it to its successor without changing its own status");
+        revisions[0].SupersededByRevisionId.Should().Be(r2.CurrentRevision.Id);
+        revisions[0].Items.Should().NotBeEmpty("historical revisions remain fully inspectable, never just a status stub");
+
+        revisions[1].Id.Should().Be(r2.CurrentRevision.Id);
+        revisions[1].RevisionIndex.Should().Be(2);
+        revisions[1].SourceRevisionId.Should().Be(r1.CurrentRevision.Id);
+        revisions[1].Status.Should().Be(QuoteRevisionStatus.GENERATED);
+    }
+
+    [Fact]
     public async Task Cancel_requires_a_reason_and_transitions_the_current_revision()
     {
         var (owner, _) = await LoggedInAsAsync(Roles.Owner);

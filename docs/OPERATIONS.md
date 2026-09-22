@@ -269,6 +269,22 @@ restore both artifacts together, and should periodically report content-addresse
 `settings.brand_asset_version.file_path` reference as recoverable orphan candidates. Never delete
 an asset-version row or a referenced file: versions are historical document evidence.
 
+### 4.2 Document storage consistency
+
+Generated document binaries (rendered HTML + PDF, ADR-0016) live in the configured
+`Documents:StorageRoot`, mirroring §4.1's exact shape one directory over: content-addressed by
+SHA-256, written before the `documents.generated_document` row is committed, never overwritten or
+deleted afterward — an issued document is evidence (CLAUDE.md rule 13). The same non-ACID caveat
+applies: a failed transaction can leave a recoverable orphan blob, never a referenced-but-missing
+one.
+
+`Documents:StorageRoot` is mandatory in Production, must be an absolute path and is validated
+before HTTP is served (same fail-closed check as `BrandAssets:StorageRoot`). The Compose `api`
+service mounts the named volume `verce_documents` at `/var/lib/verce/documents`; removing or
+recreating the application container must preserve that volume, and it backs up and restores
+alongside `verce_brand_assets` as artifact #2 in the table above. Never run
+`docker compose down -v` during an application-container restart or recovery.
+
 ---
 
 ## 5. Restore
@@ -414,6 +430,30 @@ never the `verce` database on any server. `VERCE_E2E_POSTGRES_CONTAINER` is mand
 fallback), ambiguous connection strings are refused rather than guessed, and the protected
 container is rejected by name, full Docker ID or short Docker ID alike. See
 [`tests/e2e/README.md`](../tests/e2e/README.md) for the full local-workflow and CI contract.
+
+### 7.2 `Verce.Documents.Tests` — `pdftotext` prerequisite
+
+`tests/Verce.Documents.Tests/QuotePdfPaginationTests.cs` proves real multi-page PDF pagination
+(repeated items-table header, repeated document header, correct "x / y" page numbers) against a
+**real** Chromium-rendered PDF, read back with a real PDF text-extraction tool — never OCR, never
+a pixel-diff. That tool is `pdftotext` (poppler/xpdf), invoked as an external process by
+[`PdfInspector`](../tests/Verce.Documents.Tests/PdfInspector.cs); it must be on `PATH` wherever
+this test project runs:
+
+- **Linux / CI**: `apt-get install -y poppler-utils` (or the distro equivalent).
+- **Windows dev machine**: ships with Git for Windows' bundled MinGW64 toolchain
+  (`pdftotext.exe`, from [xpdfreader.com](https://www.xpdfreader.com)) — already on `PATH` inside
+  a standard Git Bash shell; install [Xpdf tools](https://www.xpdfreader.com/download.html)
+  directly for any other shell.
+
+This project previously depended on the NuGet package `UglyToad.PdfPig` for the same purpose.
+Every transitive package in that dependency graph resolved to a single non-standard release,
+`1.7.0-custom-5`, which `nuget.org`'s own search API shows owned by account `grinay` — not the
+project's real maintainers — carrying the overwhelming majority of its historical download count
+under a placeholder `"Package Description"`, with no equivalent version in the real project's
+release history. That is a supply-chain red flag, not a usable dependency, and no clean version
+was available to pin to on that feed. It has been removed entirely; `pdftotext` never becomes a
+production dependency — it is invoked only by this test project's own verification step.
 
 ---
 
