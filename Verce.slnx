@@ -27,6 +27,8 @@
     <Project Path="tests/Verce.Catalog.Tests/Verce.Catalog.Tests.csproj" />
     <Project Path="tests/Verce.Costing.Tests/Verce.Costing.Tests.csproj" />
     <Project Path="tests/Verce.Pricing.Tests/Verce.Pricing.Tests.csproj" />
+    <Project Path="tests/Verce.Sales.Tests/Verce.Sales.Tests.csproj" />
+    <Project Path="tests/Verce.Finance.Tests/Verce.Finance.Tests.csproj" />
     <Project Path="tests/Verce.Quoting.Tests/Verce.Quoting.Tests.csproj" />
     <Project Path="tests/Verce.Production.Tests/Verce.Production.Tests.csproj" />
     <Project Path="tests/Verce.Documents.Tests/Verce.Documents.Tests.csproj" />

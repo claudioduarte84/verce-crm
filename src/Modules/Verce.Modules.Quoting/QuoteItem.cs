@@ -76,7 +76,10 @@ public sealed record QuoteItemSnapshot(
     string? FeeClampApplied,
     decimal? ManualPriceOverride,
     QuoteDiscountKind DiscountKind,
-    decimal DiscountValue);
+    decimal DiscountValue,
+    Guid? BracketId = null,
+    string? BracketResolution = null,
+    decimal? FeeBasisAmount = null);
 
 /// <summary>
 /// One quote line (DOMAIN-MODEL §8 <c>QuoteItem</c>). Owned by <see cref="QuoteRevision"/>;
@@ -123,6 +126,9 @@ public sealed class QuoteItem : Entity, IOwnedBy<QuoteRevision>
         SuggestedUnitPrice = snapshot.SuggestedUnitPrice;
         CommissionAmountPerUnit = snapshot.CommissionAmountPerUnit;
         FeeClampApplied = snapshot.FeeClampApplied;
+        BracketId = snapshot.BracketId;
+        BracketResolution = snapshot.BracketResolution;
+        FeeBasisAmount = snapshot.FeeBasisAmount;
         ManualPriceOverride = snapshot.ManualPriceOverride;
         DiscountKind = snapshot.DiscountKind;
         DiscountValue = snapshot.DiscountValue;
@@ -201,6 +207,9 @@ public sealed class QuoteItem : Entity, IOwnedBy<QuoteRevision>
     public decimal SuggestedUnitPrice { get; private set; }
     public decimal CommissionAmountPerUnit { get; private set; }
     public string? FeeClampApplied { get; private set; }
+    public Guid? BracketId { get; private set; }
+    public string? BracketResolution { get; private set; }
+    public decimal? FeeBasisAmount { get; private set; }
     public decimal? ManualPriceOverride { get; private set; }
     public bool PriceOverridden { get; private set; }
     public decimal UnitPrice { get; private set; }
@@ -208,6 +217,7 @@ public sealed class QuoteItem : Entity, IOwnedBy<QuoteRevision>
     public QuoteDiscountKind DiscountKind { get; private set; }
     public decimal DiscountValue { get; private set; }
     public decimal DiscountAmount { get; private set; }
+    public bool DiscountApplied => DiscountAmount != 0m;
     public decimal NetUnitPrice { get; private set; }
 
     public decimal LineTotalAmount { get; private set; }

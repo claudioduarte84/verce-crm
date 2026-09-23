@@ -69,6 +69,12 @@ public sealed class S5ToS6BootstrapUpgradeTests : IAsyncLifetime
         await db.GetInfrastructure().GetRequiredService<IMigrator>().MigrateAsync(targetMigration);
     }
 
+    private async Task MigrateToCurrentAsync()
+    {
+        await using var db = CreateContext();
+        await db.Database.MigrateAsync();
+    }
+
     private VerceWebApplicationFactory NewFactory() => new(_connectionString, new Dictionary<string, string?> { ["Settings:SeedOnStartup"] = "true" });
 
     /// <summary>At the terminal S5 migration, this binary's OWN model already includes the
@@ -330,17 +336,11 @@ public sealed class S5ToS6BootstrapUpgradeTests : IAsyncLifetime
             applied.Should().NotContain(x => x.StartsWith("2026092110", StringComparison.Ordinal), "this test proves the S5->S6 upgrade only — S7 is never applied here");
         }
 
-        // S7/S14 scope authority gate correction (2026-09-21): S7 added ten nullable
-        // proposal-content columns directly to the EXISTING `quoting.quote_revision` table. This
-        // test's compiled binary/EF model always includes them (one process, one model, for its
-        // whole lifetime), so the real HTTP `POST /api/quotes` flow Stage 3 depends on below —
-        // its actual point, proving S6's NEW capability against PRESERVED S5 data through real
-        // CostEngine/PricingEngine resolution — needs those columns to physically exist, even
-        // though the S7 migration itself is deliberately never applied or recorded here. Adding
-        // just the columns (never the `documents` schema, never recorded in
-        // `__EFMigrationsHistory`) is the minimal, honest way to keep the compiled model and the
-        // database schema mutually usable without claiming S7 ran.
-        await AddS7QuoteRevisionColumnsAsync();
+        // The phase assertion above remains deliberately S5 -> S6 only. Before a current
+        // application binary is allowed to query the database, migrate the historical terminal
+        // schema through every later committed migration. This preserves phase isolation and
+        // avoids pretending a current EF model can run against a partial historical schema.
+        await MigrateToCurrentAsync();
 
         // ================= Stage 3: REAL application bootstrap against the upgraded database =================
         Guid quoteId;

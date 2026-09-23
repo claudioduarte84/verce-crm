@@ -78,7 +78,8 @@ public sealed record QuoteItemResponse(Guid Id, int LineNumber, Guid? SourceQuot
     decimal SuggestedUnitPrice, decimal? ManualPriceOverride, bool PriceOverridden, decimal UnitPrice,
     QuoteDiscountKind DiscountKind, decimal DiscountValue, decimal DiscountAmount, decimal NetUnitPrice,
     decimal LineTotalAmount, decimal LineCostAmount, decimal LineFeeAmount, decimal ExpectedProfitAmount, decimal EffectiveMarginPercent,
-    QuoteItemCostSnapshotResponse CostSnapshot);
+    QuoteItemCostSnapshotResponse CostSnapshot, Guid? BracketId = null, string? BracketResolution = null,
+    decimal? FeeBasisAmount = null, bool? DiscountApplied = null, string? FeeClampApplied = null);
 
 public sealed record TechnicalHighlightResponse(string Label, string Value);
 
@@ -603,13 +604,13 @@ public static class QuotingEndpoints
         {
             // Same sales-channel context as R(n): inherit its frozen fee terms verbatim, never
             // re-resolved against "today" or whichever version is now effective.
-            feeVersion = await db.Set<FeeRuleVersion>().AsNoTracking().SingleAsync(x => x.Id == inheritedId, ct);
+            feeVersion = await db.Set<FeeRuleVersion>().AsNoTracking().Include(x => x.Brackets).SingleAsync(x => x.Id == inheritedId, ct);
         }
         else
         {
             // Create, or an explicit sales-channel context change on revise: resolve the
             // currently-effective version for THIS (possibly new) channel, exactly as before.
-            var feeRule = await db.Set<FeeRule>().AsNoTracking().Include(x => x.Versions)
+            var feeRule = await db.Set<FeeRule>().AsNoTracking().Include(x => x.Versions).ThenInclude(x => x.Brackets)
                 .SingleOrDefaultAsync(x => x.SalesChannelId == salesChannelId && x.Active, ct);
             feeVersion = feeRule?.ResolveVersionAt(organizationToday) ?? throw new ArgumentException("FEE_RULE_NOT_FOUND");
         }
@@ -636,17 +637,25 @@ public static class QuotingEndpoints
                 ? feeVersion.FixedFee
                 : Rounding.ToInternal(allocatedOrderFee / line.Request.Quantity);
 
-            var pricingResult = PricingEngine.Calculate(new PricingCalculationInput(
-                line.CostSnapshot.EstimatedUnitCost, feeVersion.CommissionPercent, fixedFeePerUnit, line.Request.DesiredMarginPercent,
-                roundingPolicy, marginWarningDenominator, feeVersion.MinimumFee, feeVersion.MaximumFee));
+            var pricingResult = CommercialPricingEngine.Calculate(new CommercialPricingInput(
+                line.CostSnapshot.EstimatedUnitCost, line.Request.DesiredMarginPercent, roundingPolicy, marginWarningDenominator,
+                line.Request.ManualPriceOverride, line.Request.DiscountKind switch
+                {
+                    QuoteDiscountKind.None => CommercialDiscountKind.None,
+                    QuoteDiscountKind.Percent => CommercialDiscountKind.Percent,
+                    QuoteDiscountKind.Amount => CommercialDiscountKind.Amount,
+                    _ => throw new ArgumentOutOfRangeException(nameof(line.Request.DiscountKind))
+                }, line.Request.DiscountValue, feeVersion.CommissionPercent, fixedFeePerUnit, feeVersion.MinimumFee,
+                feeVersion.MaximumFee, feeVersion.Brackets));
             if (pricingResult.IsFailure) throw new ArgumentException(pricingResult.ErrorCode);
 
             snapshots.Add(new QuoteItemSnapshot(
                 line.SourceQuoteItemId, line.ProductId, line.ProductRecipeId, line.Name, line.Description, line.Request.Quantity,
                 line.CostSnapshot, line.Request.DesiredMarginPercent,
-                channel.Id, feeVersion.Id, feeVersion.CommissionPercent, fixedFeeApplication, feeVersion.FixedFee,
+                channel.Id, feeVersion.Id, pricingResult.Value.CommissionPercent, fixedFeeApplication, pricingResult.Value.FixedFee,
                 allocatedOrderFee, roundingPolicy.ToString(), pricingResult.Value.SuggestedPrice, pricingResult.Value.CommissionAmount,
-                pricingResult.Value.FeeClampApplied, line.Request.ManualPriceOverride, line.Request.DiscountKind, line.Request.DiscountValue));
+                pricingResult.Value.FeeClampApplied, line.Request.ManualPriceOverride, line.Request.DiscountKind, line.Request.DiscountValue,
+                pricingResult.Value.BracketId, pricingResult.Value.BracketResolution, pricingResult.Value.FeeBasisAmount));
         }
         return snapshots;
     }
@@ -774,7 +783,7 @@ public static class QuotingEndpoints
         var items = revision.Items.OrderBy(i => i.LineNumber).Select(i => new QuoteItemResponse(
             i.Id, i.LineNumber, i.SourceQuoteItemId, i.ProductId, i.ProductNameSnapshot, i.Description, i.Quantity, i.UnitTotalCost, i.CostEngineVersion,
             i.DesiredMarginPercent, i.SalesChannelId, i.FeeRuleVersionId, i.CommissionPercent, i.FixedFeeApplication, i.RawFixedFee,
-            i.AllocatedOrderFee, i.FixedFeePerUnit, i.RoundingPolicyApplied, i.SuggestedUnitPrice, i.ManualPriceOverride, i.PriceOverridden,
+                i.AllocatedOrderFee, i.FixedFeePerUnit, i.RoundingPolicyApplied, i.SuggestedUnitPrice, i.ManualPriceOverride, i.PriceOverridden,
             i.UnitPrice, i.DiscountKind, i.DiscountValue, i.DiscountAmount, i.NetUnitPrice, i.LineTotalAmount, i.LineCostAmount,
             i.LineFeeAmount, i.ExpectedProfitAmount, i.EffectiveMarginPercent,
             new QuoteItemCostSnapshotResponse(i.CostSnapshot.EngineVersion, i.CostSnapshot.MaterialCostBeforeWastage, i.CostSnapshot.MaterialWastageCost,
@@ -785,7 +794,8 @@ public static class QuotingEndpoints
                     m.EnteredQuantity, m.EnteredUnit, m.NormalizedQuantityBaseUnit, m.BaseUnit, m.WastagePercent, m.EffectiveQuantityBaseUnit,
                     m.CostSource, m.CostPolicy, m.UnitCostBaseUnit, m.CostBeforeWastage, m.WastageCost, m.CostAfterWastage,
                     m.CurrentStockBaseUnitAtIssue, m.ExceededCurrentStockAtIssue)).ToList(),
-                i.AdditionalCosts.OrderBy(a => a.LineNumber).Select(a => new QuoteItemAdditionalCostResponse(a.Description, a.Amount)).ToList())))
+                i.AdditionalCosts.OrderBy(a => a.LineNumber).Select(a => new QuoteItemAdditionalCostResponse(a.Description, a.Amount)).ToList()),
+            i.BracketId, i.BracketResolution, i.FeeBasisAmount, i.DiscountApplied, i.FeeClampApplied))
             .ToList();
 
         var proposalContent = new ProposalContentResponse(revision.Title, revision.Scope, DeserializeHighlights(revision.TechnicalHighlightsJson),

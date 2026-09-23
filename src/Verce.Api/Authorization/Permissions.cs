@@ -24,6 +24,10 @@ public static class Permissions
     public const string QuotingRead = "quoting:read";
     public const string QuotingManage = "quoting:manage";
     public const string ProductionRead = "production:read";
+    public const string SalesRead = "sales:read";
+    public const string SalesManage = "sales:manage";
+    public const string ExpensesRead = "expenses:read";
+    public const string ExpensesManage = "expenses:manage";
     public static void AddPolicies(Microsoft.AspNetCore.Authorization.AuthorizationOptions options)
     {
         options.AddPolicy(CustomersRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
@@ -44,5 +48,9 @@ public static class Permissions
         options.AddPolicy(QuotingRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
         options.AddPolicy(QuotingManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
         options.AddPolicy(ProductionRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
+        options.AddPolicy(SalesRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
+        options.AddPolicy(SalesManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
+        options.AddPolicy(ExpensesRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
+        options.AddPolicy(ExpensesManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
     }
 }

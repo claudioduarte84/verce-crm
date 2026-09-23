@@ -200,6 +200,32 @@ public sealed class SupplyHttpIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Package_purchase_preserves_the_authoritative_total_for_100_units_at_35_reais()
+    {
+        var (owner, _) = await LoggedInAsAsync(Roles.Owner);
+        var supply = await CreateSupplyAsync(owner, "PKG-100-35", "Pacote 100", unit: SupplyBaseUnit.Unit);
+        await AssertPurchaseSnapshotAsync(owner, supply, 100m, SupplyBaseUnit.Unit, 35m, 0.350000m);
+    }
+
+    [Fact]
+    public async Task Package_purchase_preserves_the_authoritative_total_for_3_units_at_10_reais()
+    {
+        var (owner, _) = await LoggedInAsAsync(Roles.Owner);
+        var supply = await CreateSupplyAsync(owner, "PKG-3-10", "Pacote 3", unit: SupplyBaseUnit.Unit);
+        await AssertPurchaseSnapshotAsync(owner, supply, 3m, SupplyBaseUnit.Unit, 10m, 3.333333m);
+    }
+
+    [Fact]
+    public async Task Spool_purchase_accepts_non_default_250_and_2000_gram_quantities()
+    {
+        var (owner, _) = await LoggedInAsAsync(Roles.Owner);
+        var small = await CreateSupplyAsync(owner, "SPOOL-250", "Carretel 250g");
+        var large = await CreateSupplyAsync(owner, "SPOOL-2000", "Carretel 2000g");
+        await AssertPurchaseSnapshotAsync(owner, small, 250m, SupplyBaseUnit.Gram, 22.50m, 0.090000m);
+        await AssertPurchaseSnapshotAsync(owner, large, 2000m, SupplyBaseUnit.Gram, 180m, 0.090000m);
+    }
+
+    [Fact]
     public async Task Zero_after_normalization_is_a_bad_request_for_every_inventory_command_and_never_posts()
     {
         var (owner, _) = await LoggedInAsAsync(Roles.Owner);
@@ -401,6 +427,22 @@ public sealed class SupplyHttpIntegrationTests : IAsyncLifetime
         var response = await client.PostAsync("/api/supplies", new SupplyCreateRequest(code, name, null, categoryCode, unit, minimumStock, null, null, null));
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         return await ReadAsync<SupplyResponse>(response);
+    }
+
+    private static async Task AssertPurchaseSnapshotAsync(AuthTestClient client, SupplyResponse supply, decimal quantity,
+        SupplyBaseUnit enteredUnit, decimal totalCost, decimal expectedUnitCost)
+    {
+        var receipt = await client.PostAsync($"/api/supplies/{supply.Id}/inventory/purchase-receipt",
+            new PurchaseReceiptRequest(quantity, enteredUnit, DateTimeOffset.UtcNow, null, totalCost, null, null, null, supply.Version));
+        receipt.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await ReadAsync<SupplyResponse>(receipt);
+        var movements = await ReadAsync<InventoryMovementListResponse>(await client.GetAsync($"/api/supplies/{supply.Id}/inventory/movements"));
+        var movement = movements.Items.Should().ContainSingle(x => x.Type == InventoryMovementType.PurchaseReceipt).Which;
+        movement.EnteredQuantity.Should().Be(quantity);
+        movement.QuantityDeltaBaseUnit.Should().Be(quantity);
+        movement.UnitCostSnapshot.Should().Be(expectedUnitCost);
+        movement.TotalCostSnapshot.Should().Be(totalCost);
+        body.LatestPurchaseUnitCost.Should().Be(expectedUnitCost);
     }
 
     private static async Task<T> ReadAsync<T>(HttpResponseMessage response)

@@ -156,12 +156,47 @@ public sealed class PricingHttpIntegrationTests : IAsyncLifetime
         nonZeroFixedFee.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await ProblemCodeAsync(nonZeroFixedFee)).Should().Be("DIRECT_CHANNEL_FEES_NOT_ALLOWED");
 
+        var nonZeroBracketFee = await owner.PostAsync($"/api/pricing/channels/{direct.Id}/fee-rule/versions", new FeeRuleVersionCreateRequest(
+            new DateOnly(2030, 1, 1), null, 0m, 0m, FixedFeeApplication.PerUnit, null, null, null, false,
+            [new PriceBracketCreateRequest(0m, null, 0.01m, 0m, null, null, 1)]));
+        nonZeroBracketFee.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ProblemCodeAsync(nonZeroBracketFee)).Should().Be("DIRECT_CHANNEL_FEES_NOT_ALLOWED");
+
         // A zero-fee version remains legal — the mandatory seeded shape itself. The seeded
         // channel already has an open-ended zero-fee version from 2020-01-01, so this closes it
         // first (any two open-ended ranges would otherwise always overlap regardless of values).
         (await owner.PostAsync($"/api/pricing/channels/{direct.Id}/fee-rule/versions", new FeeRuleVersionCreateRequest(
             new DateOnly(2030, 1, 1), null, 0m, 0m, FixedFeeApplication.PerUnit, null, null, null, CloseCurrentOpenVersion: true)))
             .StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    [Fact]
+    public async Task Price_brackets_persist_against_their_fee_rule_version_and_real_PostgreSQL_rejects_overlap()
+    {
+        var (owner, _) = await LoggedInAsAsync(Roles.Owner);
+        var channel = await ReadAsync<SalesChannelResponse>(await owner.PostAsync("/api/pricing/channels",
+            new SalesChannelCreateRequest("BRACKET-PG", "Bracket PostgreSQL", SalesChannelKind.Marketplace, null, null)));
+        (await owner.PostAsync($"/api/pricing/channels/{channel.Id}/fee-rule", new FeeRuleCreateRequest("Regra por faixa"))).StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var created = await owner.PostAsync($"/api/pricing/channels/{channel.Id}/fee-rule/versions", new FeeRuleVersionCreateRequest(
+            new DateOnly(2020, 1, 1), null, 0m, 0m, FixedFeeApplication.PerUnit, null, null, null, false,
+            [new PriceBracketCreateRequest(0m, 100m, 0.10m, 1m, null, null, 1),
+             new PriceBracketCreateRequest(100m, null, 0.20m, 2m, null, null, 2)]));
+        created.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        await using var db = _fixture.CreateContext();
+        var rule = await db.Set<FeeRule>().AsNoTracking().Include(x => x.Versions).ThenInclude(x => x.Brackets)
+            .SingleAsync(x => x.SalesChannelId == channel.Id);
+        var version = rule.Versions.Should().ContainSingle().Which;
+        version.Brackets.Should().HaveCount(2);
+        version.Brackets.Should().OnlyContain(x => x.FeeRuleVersionId == version.Id);
+
+        var overlap = await owner.PostAsync($"/api/pricing/channels/{channel.Id}/fee-rule/versions", new FeeRuleVersionCreateRequest(
+            new DateOnly(2030, 1, 1), null, 0m, 0m, FixedFeeApplication.PerUnit, null, null, null, true,
+            [new PriceBracketCreateRequest(0m, 100m, 0.10m, 1m, null, null, 1),
+             new PriceBracketCreateRequest(90m, null, 0.20m, 2m, null, null, 2)]));
+        overlap.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ProblemCodeAsync(overlap)).Should().Be("FEE_RULE_VERSION_OVERLAPS_EXISTING");
     }
 
     [Fact]

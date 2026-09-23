@@ -24,6 +24,7 @@ public static class SequentialNumberAllocator
 {
     public const string QuoteSeries = "QUOTE";
     public const string ProductionOrderSeries = "PRODUCTION_ORDER";
+    public const string SaleSeries = "SALE";
 
     public static async Task<int> AllocateAsync(VerceDbContext db, string series, DateOnly organizationDate, CancellationToken cancellationToken)
     {

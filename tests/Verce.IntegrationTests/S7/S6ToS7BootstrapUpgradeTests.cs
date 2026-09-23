@@ -74,6 +74,12 @@ public sealed class S6ToS7BootstrapUpgradeTests : IAsyncLifetime
         await db.GetInfrastructure().GetRequiredService<IMigrator>().MigrateAsync(targetMigration);
     }
 
+    private async Task MigrateToCurrentAsync()
+    {
+        await using var db = CreateContext();
+        await db.Database.MigrateAsync();
+    }
+
     private VerceWebApplicationFactory NewFactory() => new(_connectionString, new Dictionary<string, string?>
     {
         ["Settings:SeedOnStartup"] = "true",
@@ -296,6 +302,10 @@ public sealed class S6ToS7BootstrapUpgradeTests : IAsyncLifetime
             applied.Should().Contain(S6FinalMigration, "prior S6 migrations must remain recorded, never rewritten");
             applied.Should().Contain(S7FinalMigration, "the final S7 migration must be the one actually applied");
         }
+
+        // This is the explicit S7 -> current (S8A) upgrade boundary. The prior assertion proves
+        // the S7 terminal state first; only then is the current model allowed to access it.
+        await MigrateToCurrentAsync();
 
         // ================= Stage 3: REAL application bootstrap against the upgraded database =================
         Guid generatedDocumentIdAfterFirstGeneration;

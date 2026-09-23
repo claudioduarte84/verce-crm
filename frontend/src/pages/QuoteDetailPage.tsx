@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { apiClient } from '../api/client'
 import type {
   ProductListItemResponse, ProductListResponse, ProposalContentRequest, QuoteCancelRequest, QuoteDiscountKind,
@@ -85,6 +85,7 @@ function toExistingDraft(item: QuoteItemResponse): ExistingLineDraft {
 }
 
 export function QuoteDetailPage() {
+  const navigate = useNavigate()
   const { quoteId } = useParams<{ quoteId: string }>()
   const { session } = useSession()
   const roles = session.status === 'authenticated' ? session.user.roles : []
@@ -259,6 +260,13 @@ export function QuoteDetailPage() {
     else setMessage(quoteErrorMessage(result.error))
   }
 
+  async function registerSale() {
+    if (!quote) return
+    const result = await apiClient.post<{ id: string }>(`/api/sales/from-quote/${quote.currentRevision.id}`, { conversionRequestId: crypto.randomUUID() })
+    if (result.ok) navigate(`/sales/${result.data.id}`)
+    else setMessage(quoteErrorMessage(result.error))
+  }
+
   async function generatePdf() {
     if (!quote) return
     const result = await apiClient.post<QuotePdfMetadataResponse>(`/api/quotes/${quote.id}/revisions/${quote.currentRevision.id}/pdf`)
@@ -330,6 +338,7 @@ export function QuoteDetailPage() {
   const canSend = current.status === 'GENERATED' || current.status === 'NEGOTIATING'
   const canNegotiate = current.status === 'GENERATED' || current.status === 'SENT'
   const canCancel = current.status === 'GENERATED' || current.status === 'SENT' || current.status === 'NEGOTIATING'
+  const canRegisterSale = current.status === 'APPROVED'
 
   return (
     <section className="product-page">
@@ -357,6 +366,7 @@ export function QuoteDetailPage() {
               <button type="button" disabled={busy || !canSend} onClick={() => void runAction(send)}>Enviar</button>
               <button type="button" disabled={busy || !canNegotiate} onClick={() => void runAction(negotiate)}>Marcar em negociação</button>
               <button type="button" disabled={busy || !canApprove} onClick={() => void runAction(approve)}>Aprovar</button>
+              {canRegisterSale && <button type="button" className="button-primary" disabled={busy} onClick={() => void runAction(registerSale)}>Registrar venda</button>}
               <button type="button" className="button-danger" disabled={busy || !canCancel} onClick={() => void runAction(cancel)}>Cancelar</button>
               <button type="button" disabled={busy || current.status === 'CANCELED' || current.status === 'EXPIRED'} onClick={startRevise}>Criar nova revisão</button>
             </div>
@@ -418,6 +428,9 @@ export function QuoteDetailPage() {
                       <summary>Explicar preço — item {item.lineNumber}</summary>
                       <dl className="totals-grid">
                         <div><dt>Motor de custo</dt><dd>{item.costSnapshot.engineVersion}</dd></div>
+                        <div><dt>Resolução de faixa</dt><dd>{item.bracketResolution ?? 'VERSION_FLAT'}</dd></div>
+                        <div><dt>Base da taxa (BRL)</dt><dd>{item.feeBasisAmount === null || item.feeBasisAmount === undefined ? '—' : item.feeBasisAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
+                        <div><dt>Explicação comercial</dt><dd>{item.priceOverridden ? 'Preço manual' : 'Preço sugerido'}{item.discountApplied ? ' · desconto aplicado' : ''}{item.feeClampApplied ? ` · limite ${item.feeClampApplied}` : ''}</dd></div>
                         <div><dt>Custo de materiais (antes de perdas)</dt><dd>{money(item.costSnapshot.materialCostBeforeWastage)}</dd></div>
                         <div><dt>Custo de perdas de material</dt><dd>{money(item.costSnapshot.materialWastageCost)}</dd></div>
                         <div><dt>Custo total de materiais</dt><dd>{money(item.costSnapshot.materialsTotalCost)}</dd></div>

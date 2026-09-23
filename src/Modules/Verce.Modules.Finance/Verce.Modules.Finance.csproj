@@ -9,6 +9,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Verce.SharedKernel\Verce.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\Verce.Platform\Verce.Platform.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.11" />
   </ItemGroup>
 
 </Project>

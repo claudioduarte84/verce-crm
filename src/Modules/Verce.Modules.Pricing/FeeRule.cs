@@ -9,6 +9,8 @@ namespace Verce.Modules.Pricing;
 /// breaking change later; only PER_UNIT is exercised by S5's PricingEngine.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<FixedFeeApplication>))]
 public enum FixedFeeApplication { PerUnit, PerOrder }
+public sealed record PriceBracketInput(decimal MinPrice, decimal? MaxPrice, decimal CommissionPercent, decimal FixedFee,
+    decimal? MinimumFee, decimal? MaximumFee, int SortOrder);
 
 /// <summary>
 /// S5 FeeRule (DOMAIN-MODEL §7, ADR-0005). Deliberately narrower than the DOMAIN-MODEL sketch:
@@ -59,12 +61,18 @@ public sealed class FeeRule : AggregateRoot
     /// restriction) so existing marketplace-only call sites/tests are unaffected.</summary>
     public FeeRuleVersion AddVersion(DateOnly validFrom, DateOnly? validUntil, decimal commissionPercent, decimal fixedFee,
         FixedFeeApplication fixedFeeApplication, decimal? minimumFee, decimal? maximumFee, string? notes,
-        SalesChannelKind channelKind = SalesChannelKind.Marketplace)
+        SalesChannelKind channelKind = SalesChannelKind.Marketplace, IReadOnlyList<PriceBracketInput>? priceBrackets = null)
     {
         if (validUntil is { } until && until <= validFrom) throw new ArgumentException("FEE_RULE_VERSION_INVALID_WINDOW");
-        if (channelKind == SalesChannelKind.Direct && (commissionPercent != 0m || fixedFee != 0m))
+        if (channelKind == SalesChannelKind.Direct &&
+            (commissionPercent != 0m || fixedFee != 0m ||
+             (priceBrackets ?? []).Any(x => x.CommissionPercent != 0m || x.FixedFee != 0m ||
+                 x.MinimumFee is not null and not 0m || x.MaximumFee is not null and not 0m)))
             throw new ArgumentException("DIRECT_CHANNEL_FEES_NOT_ALLOWED");
         var version = new FeeRuleVersion(Id, validFrom, validUntil, commissionPercent, fixedFee, fixedFeeApplication, minimumFee, maximumFee, notes);
+        foreach (var bracket in priceBrackets ?? [])
+            version.AddBracket(bracket.MinPrice, bracket.MaxPrice, bracket.CommissionPercent, bracket.FixedFee,
+                bracket.MinimumFee, bracket.MaximumFee, bracket.SortOrder);
         _versions.Add(version);
         return version;
     }
@@ -100,6 +108,7 @@ public sealed class FeeRule : AggregateRoot
 /// §86), not application sequencing alone.</summary>
 public sealed class FeeRuleVersion : Entity, IOwnedBy<FeeRule>
 {
+    private readonly List<PriceBracket> _brackets = [];
     private FeeRuleVersion() { }
 
     internal FeeRuleVersion(Guid feeRuleId, DateOnly validFrom, DateOnly? validUntil, decimal commissionPercent, decimal fixedFee,
@@ -140,10 +149,57 @@ public sealed class FeeRuleVersion : Entity, IOwnedBy<FeeRule>
     public decimal? MinimumFee { get; private set; }
     public decimal? MaximumFee { get; private set; }
     public string? Notes { get; private set; }
+    public IReadOnlyList<PriceBracket> Brackets => _brackets.AsReadOnly();
+
+    internal PriceBracket AddBracket(decimal minPrice, decimal? maxPrice, decimal commissionPercent, decimal fixedFee,
+        decimal? minimumFee, decimal? maximumFee, int sortOrder) =>
+        AddBracket(new PriceBracket(Id, minPrice, maxPrice, commissionPercent, fixedFee, minimumFee, maximumFee, sortOrder));
+
+    private PriceBracket AddBracket(PriceBracket bracket)
+    {
+        _brackets.Add(bracket);
+        return bracket;
+    }
 
     internal void Close(DateOnly asOf)
     {
         if (asOf <= ValidFrom) throw new ArgumentException("FEE_RULE_VERSION_INVALID_WINDOW");
         ValidUntil = asOf;
     }
+}
+
+/// <summary>One immutable commercial-fee interval for a FeeRuleVersion (ADR-0022, CR-07.5).
+/// PostgreSQL's exclusion constraint is the final overlap authority; these checks give callers a
+/// stable error before persistence and prevent malformed candidates in isolated tests.</summary>
+public sealed class PriceBracket : Entity, IOwnedBy<FeeRuleVersion>
+{
+    private PriceBracket() { }
+
+    internal PriceBracket(Guid feeRuleVersionId, decimal minPrice, decimal? maxPrice, decimal commissionPercent,
+        decimal fixedFee, decimal? minimumFee, decimal? maximumFee, int sortOrder)
+    {
+        if (feeRuleVersionId == Guid.Empty) throw new ArgumentException("PRICE_BRACKET_VERSION_REQUIRED");
+        if (minPrice < 0 || maxPrice is <= 0 || (maxPrice is { } max && max <= minPrice)) throw new ArgumentException("PRICE_BRACKET_RANGE_INVALID");
+        if (commissionPercent < 0 || commissionPercent >= 1) throw new ArgumentException("PRICING_INVALID_COMMISSION");
+        if (fixedFee < 0 || !Verce.SharedKernel.Rounding.HasMoneyPrecision(fixedFee)) throw new ArgumentException("FIXED_FEE_PRECISION_INVALID");
+        if (minimumFee is < 0 || maximumFee is < 0 || (minimumFee is { } min && maximumFee is { } upper && min > upper))
+            throw new ArgumentException("PRICE_BRACKET_FEE_RANGE_INVALID");
+        if (minimumFee is { } minimum && !Verce.SharedKernel.Rounding.HasMoneyPrecision(minimum)) throw new ArgumentException("FIXED_FEE_PRECISION_INVALID");
+        if (maximumFee is { } maximum && !Verce.SharedKernel.Rounding.HasMoneyPrecision(maximum)) throw new ArgumentException("FIXED_FEE_PRECISION_INVALID");
+        if (sortOrder < 0) throw new ArgumentException("PRICE_BRACKET_SORT_ORDER_INVALID");
+        FeeRuleVersionId = feeRuleVersionId; MinPrice = Verce.SharedKernel.Rounding.ToMoney(minPrice); MaxPrice = maxPrice is null ? null : Verce.SharedKernel.Rounding.ToMoney(maxPrice.Value);
+        CommissionPercent = commissionPercent; FixedFee = Verce.SharedKernel.Rounding.ToMoney(fixedFee); MinimumFee = minimumFee; MaximumFee = maximumFee; SortOrder = sortOrder;
+    }
+
+    public Guid FeeRuleVersionId { get; private set; }
+    public Guid ParentId => FeeRuleVersionId;
+    public decimal MinPrice { get; private set; }
+    public decimal? MaxPrice { get; private set; }
+    public decimal CommissionPercent { get; private set; }
+    public decimal FixedFee { get; private set; }
+    public decimal? MinimumFee { get; private set; }
+    public decimal? MaximumFee { get; private set; }
+    public int SortOrder { get; private set; }
+
+    public bool Contains(decimal price) => price >= MinPrice && (MaxPrice is null || price < MaxPrice);
 }

@@ -268,6 +268,9 @@ public sealed class QuoteRevision : Entity, IOwnedBy<Quote>
         Notes = Trim(proposalContent.Notes);
         InternalNotes = Trim(proposalContent.InternalNotes);
 
+        if (items.Any(x => x.SalesChannelId != salesChannelId))
+            throw new ArgumentException("QUOTE_MIXED_CHANNEL_NOT_SUPPORTED");
+
         for (var i = 0; i < items.Count; i++)
         {
             _items.Add(new QuoteItem(Id, i + 1, items[i]));

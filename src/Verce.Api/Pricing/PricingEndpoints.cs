@@ -19,7 +19,10 @@ public sealed record SalesChannelUpdateRequest(string Name, SalesChannelKind Kin
 public sealed record SalesChannelResponse(Guid Id, string Code, string Name, SalesChannelKind Kind, decimal? DefaultMarginPercent, string? Notes, bool Active, long Version);
 
 public sealed record FeeRuleVersionCreateRequest(DateOnly ValidFrom, DateOnly? ValidUntil, decimal CommissionPercent, decimal FixedFee,
-    FixedFeeApplication FixedFeeApplication, decimal? MinimumFee, decimal? MaximumFee, string? Notes, bool CloseCurrentOpenVersion);
+    FixedFeeApplication FixedFeeApplication, decimal? MinimumFee, decimal? MaximumFee, string? Notes, bool CloseCurrentOpenVersion,
+    IReadOnlyList<PriceBracketCreateRequest>? PriceBrackets = null);
+public sealed record PriceBracketCreateRequest(decimal MinPrice, decimal? MaxPrice, decimal CommissionPercent, decimal FixedFee,
+    decimal? MinimumFee, decimal? MaximumFee, int SortOrder);
 public sealed record FeeRuleVersionResponse(Guid Id, DateOnly ValidFrom, DateOnly? ValidUntil, decimal CommissionPercent, decimal FixedFee,
     FixedFeeApplication FixedFeeApplication, decimal? MinimumFee, decimal? MaximumFee, string? Notes);
 public sealed record FeeRuleResponse(Guid Id, Guid SalesChannelId, string Name, bool Active, long Version, IReadOnlyList<FeeRuleVersionResponse> Versions);
@@ -174,7 +177,9 @@ public static class PricingEndpoints
                     // never gain non-zero commercial terms — enforced in the domain method itself
                     // so no future caller can bypass it.
                     rule.AddVersion(request.ValidFrom, request.ValidUntil, request.CommissionPercent, request.FixedFee,
-                        request.FixedFeeApplication, request.MinimumFee, request.MaximumFee, request.Notes, channel.Kind);
+                        request.FixedFeeApplication, request.MinimumFee, request.MaximumFee, request.Notes, channel.Kind,
+                        request.PriceBrackets?.Select(x => new PriceBracketInput(x.MinPrice, x.MaxPrice, x.CommissionPercent, x.FixedFee,
+                            x.MinimumFee, x.MaximumFee, x.SortOrder)).ToArray());
                 }, ct);
                 var updated = await readDb.Set<FeeRule>().AsNoTracking().Include(x => x.Versions).SingleAsync(x => x.SalesChannelId == channelId, ct);
                 return Results.Created($"/api/pricing/channels/{channelId}/fee-rule", ToResponse(updated));

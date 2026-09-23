@@ -97,6 +97,10 @@ export function SuppliesPage() {
   const [adjustmentReason, setAdjustmentReason] = useState('')
   const [purchaseQuantity, setPurchaseQuantity] = useState('')
   const [purchaseUnit, setPurchaseUnit] = useState<SupplyBaseUnit>('Gram')
+  const [packageCount, setPackageCount] = useState('')
+  const [unitsPerPackage, setUnitsPerPackage] = useState('')
+  const [spoolCount, setSpoolCount] = useState('')
+  const [spoolWeight, setSpoolWeight] = useState('')
   const [purchaseTotalCost, setPurchaseTotalCost] = useState('')
   const [purchaseSupplier, setPurchaseSupplier] = useState('')
   const [purchaseReference, setPurchaseReference] = useState('')
@@ -199,6 +203,17 @@ export function SuppliesPage() {
     })
     if (result.ok) { setMessage('Compra registrada.'); setPurchaseQuantity(''); setPurchaseTotalCost(''); setPurchaseSupplier(''); setPurchaseReference(''); await open(selected.id); await load(page) }
     else setMessage(result.error.safeMessage)
+  }
+
+  function applyPackageAid() {
+    const quantity = Number(packageCount || 0) * Number(unitsPerPackage || 0)
+    if (quantity > 0) setPurchaseQuantity(String(quantity))
+  }
+
+  function applySpoolAid() {
+    const suggestedWeight = selected?.filament?.spoolNetWeightGrams ?? 1000
+    const quantity = Number(spoolCount || 0) * Number(spoolWeight || suggestedWeight)
+    if (quantity > 0) { setPurchaseQuantity(String(quantity)); setPurchaseUnit('Gram') }
   }
 
   async function submitAdjustment(event: FormEvent) {
@@ -369,6 +384,26 @@ export function SuppliesPage() {
 
               <form className="form-stack" onSubmit={submitPurchaseReceipt}>
                 <h3>Registrar compra</h3>
+                <fieldset>
+                  <legend>Auxílio para pacote</legend>
+                  <div className="inline-form">
+                    <label>Pacotes<input type="number" min={0} step="1" value={packageCount} onChange={(e) => setPackageCount(e.target.value)} /></label>
+                    <label>Unidades por pacote<input aria-label="Unidades por pacote" type="number" min={0} step="any" value={unitsPerPackage} onChange={(e) => setUnitsPerPackage(e.target.value)} /></label>
+                    <button type="button" onClick={applyPackageAid}>Aplicar quantidade</button>
+                  </div>
+                  <p>Calcula apenas a quantidade canônica; o valor total permanece a fonte financeira.</p>
+                </fieldset>
+                {selected.filament && (
+                  <fieldset>
+                    <legend>Auxílio para bobinas</legend>
+                    <div className="inline-form">
+                      <label>Bobinas<input type="number" min={0} step="1" value={spoolCount} onChange={(e) => setSpoolCount(e.target.value)} /></label>
+                      <label>Peso por bobina (g)<input aria-label="Peso por bobina" type="number" min={0} step="any" placeholder={String(selected.filament.spoolNetWeightGrams ?? 1000)} value={spoolWeight} onChange={(e) => setSpoolWeight(e.target.value)} /></label>
+                      <button type="button" onClick={applySpoolAid}>Aplicar peso</button>
+                    </div>
+                    <p>1.000 g é apenas sugestão de preenchimento; o peso da bobina é editável.</p>
+                  </fieldset>
+                )}
                 <label htmlFor="purchase-quantity">Quantidade</label>
                 <div className="inline-form">
                   <input id="purchase-quantity" type="number" min={0} step="any" required value={purchaseQuantity} onChange={(e) => setPurchaseQuantity(e.target.value)} />

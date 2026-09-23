@@ -60,7 +60,7 @@ function mockLoad(overrides: { quote?: typeof quote; pdfFound?: boolean } = {}) 
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={['/quotes/q1']}>
-      <Routes><Route path="/quotes/:quoteId" element={<QuoteDetailPage />} /></Routes>
+      <Routes><Route path="/quotes/:quoteId" element={<QuoteDetailPage />} /><Route path="/sales/:saleId" element={<p>Venda aberta</p>} /></Routes>
     </MemoryRouter>,
   )
 }
@@ -201,5 +201,28 @@ describe('QuoteDetailPage', () => {
     expect(screen.getByRole('button', { name: 'Enviar' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Aprovar' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Cancelar' })).toBeDisabled()
+  })
+
+  it('converts an approved quote explicitly and navigates to the canonical Sale', async () => {
+    const user = userEvent.setup()
+    const approved = { ...quote, currentRevision: { ...currentRevision, status: 'APPROVED' } }
+    mockLoad({ quote: approved })
+    api.post.mockResolvedValue({ ok: true, data: { id: 'sale-1' } })
+    renderPage()
+    await screen.findByRole('button', { name: 'Registrar venda' })
+    await user.click(screen.getByRole('button', { name: 'Registrar venda' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/sales/from-quote/r1', expect.objectContaining({ conversionRequestId: expect.any(String) })))
+    expect(await screen.findByText('Venda aberta')).toBeInTheDocument()
+  })
+
+  it('shows the server-safe error when explicit conversion is refused', async () => {
+    const user = userEvent.setup()
+    const approved = { ...quote, currentRevision: { ...currentRevision, status: 'APPROVED' } }
+    mockLoad({ quote: approved })
+    api.post.mockResolvedValue({ ok: false, error: { status: 409, safeMessage: 'Já existe uma venda ativa para esta revisão.', problem: { code: 'SALE_ALREADY_EXISTS_FOR_REVISION' } } })
+    renderPage()
+    await screen.findByRole('button', { name: 'Registrar venda' })
+    await user.click(screen.getByRole('button', { name: 'Registrar venda' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Já existe uma venda ativa')
   })
 })

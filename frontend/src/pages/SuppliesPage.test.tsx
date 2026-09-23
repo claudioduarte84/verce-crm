@@ -151,6 +151,36 @@ describe('SuppliesPage', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Compra registrada.')
   })
 
+  it('submits canonical package and editable spool quantities without duplicating financial math', async () => {
+    const user = userEvent.setup()
+    const supply = { id: 's-aid', code: 'FIL-AID', name: 'Filamento para auxílios', description: null, categoryCode: 'FILAMENT', baseUnit: 'Gram', minimumStock: null, preferredSupplier: null, notes: null, active: true, currentStockBaseUnit: 0, latestPurchaseUnitCost: null, isLowStock: false, hasRecordedMovement: false, filament: { materialType: 'Pla', brand: 'Teste', colorName: 'Azul', colorCode: null, diameterMm: 1.75, spoolNetWeightGrams: 1000 }, version: 1 }
+    api.get.mockImplementation((path: string) => {
+      if (path.startsWith('/api/supplies/categories')) return Promise.resolve(categoriesResponse)
+      if (path === '/api/supplies/s-aid') return Promise.resolve({ ok: true, data: supply })
+      if (path.includes('/inventory/movements')) return Promise.resolve({ ok: true, data: { items: [], page: 1, pageSize: 20, total: 0 } })
+      if (path.startsWith('/api/supplies?')) return Promise.resolve({ ok: true, data: { items: [supply], page: 1, pageSize: 10, total: 1 } })
+      return Promise.resolve(emptyListResponse)
+    })
+    api.post.mockResolvedValue({ ok: true, data: { ...supply, version: 2 } })
+    render(<SuppliesPage />)
+    await user.click(await screen.findByRole('button', { name: /FIL-AID/ }))
+    const purchaseForm = (await screen.findByRole('heading', { name: 'Registrar compra' })).closest('form')!
+
+    await user.type(within(purchaseForm).getByLabelText('Pacotes'), '2')
+    await user.type(within(purchaseForm).getByLabelText('Unidades por pacote'), '50')
+    await user.click(within(purchaseForm).getByRole('button', { name: 'Aplicar quantidade' }))
+    expect(within(purchaseForm).getByLabelText('Quantidade')).toHaveValue(100)
+
+    await user.type(within(purchaseForm).getByLabelText('Bobinas'), '2')
+    await user.type(within(purchaseForm).getByLabelText('Peso por bobina'), '500')
+    await user.click(within(purchaseForm).getByRole('button', { name: 'Aplicar peso' }))
+    expect(within(purchaseForm).getByLabelText('Quantidade')).toHaveValue(1000)
+    expect(within(purchaseForm).getByRole('combobox')).toHaveValue('Gram')
+    await user.type(within(purchaseForm).getByLabelText('Valor total (R$)'), '89.90')
+    await user.click(within(purchaseForm).getByRole('button', { name: 'Registrar compra' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/supplies/s-aid/inventory/purchase-receipt', expect.objectContaining({ quantity: 1000, enteredUnit: 'Gram', totalCost: 89.9 })))
+  })
+
   it('rejects an insufficient-stock adjustment with the server-provided message', async () => {
     const user = userEvent.setup()
     const supply = { id: 's1', code: 'FIL-PLA-PRETO', name: 'PLA Preto', description: null, categoryCode: 'FILAMENT', baseUnit: 'Gram', minimumStock: null, preferredSupplier: null, notes: null, active: true, currentStockBaseUnit: 50, latestPurchaseUnitCost: null, isLowStock: false, hasRecordedMovement: true, filament: null, version: 2 }

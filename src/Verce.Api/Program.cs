@@ -11,11 +11,13 @@ using Verce.Api.Catalog;
 using Verce.Api.Cli;
 using Verce.Api.Customers;
 using Verce.Api.Costing;
+using Verce.Api.Finance;
 using Verce.Api.Inventory;
 using Verce.Api.Outbox;
 using Verce.Api.Pricing;
 using Verce.Api.Quoting;
 using Verce.Api.Settings;
+using Verce.Api.Sales;
 using Verce.Modules.Production;
 using Verce.Modules.Quoting;
 using Verce.Modules.Quoting.Contracts;
@@ -111,6 +113,7 @@ builder.Services.AddScoped<Verce.Modules.Costing.ICostingInventoryReader, Verce.
 builder.Services.AddHostedService<Verce.Modules.Settings.SettingsSeedService>();
 builder.Services.AddHostedService<Verce.Modules.Inventory.InventorySeedService>();
 builder.Services.AddHostedService<Verce.Modules.Pricing.PricingSeedService>();
+builder.Services.AddHostedService<Verce.Modules.Finance.FinanceSeedService>();
 // ADR-0007 §7 (S7/S14 scope authority gate, OPTION A): seeds document_type + the default VERCE
 // proposal template as ordinary rows — never compiled renderer code.
 builder.Services.AddHostedService<Verce.Modules.Documents.DocumentsSeedService>();
@@ -251,6 +254,8 @@ app.MapProductEndpoints();
 app.MapPricingEndpoints();
 app.MapQuotingEndpoints();
 app.MapQuotePdfEndpoints();
+app.MapExpenseEndpoints();
+app.MapSalesEndpoints();
 
 // ---- Health endpoints (ADR-0012 §25, OPERATIONS §9): status word only, anonymous ----
 app.MapGet("/health/live", () => Results.Text("healthy")).AllowAnonymous();

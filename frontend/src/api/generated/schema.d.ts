@@ -2863,10 +2863,361 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/expenses/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/expenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    treatment?: components["schemas"]["AccountingTreatment"];
+                    category?: string;
+                    channel?: string;
+                    from?: string;
+                    to?: string;
+                    page?: number | string;
+                    pageSize?: number | string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ExpenseWriteRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/expenses/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ExpenseWriteRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete: {
+            parameters: {
+                query: {
+                    version: number | string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    status?: components["schemas"]["SaleStatus"];
+                    channel?: string;
+                    customer?: string;
+                    from?: string;
+                    to?: string;
+                    page?: number | string;
+                    pageSize?: number | string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ManualSaleRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales/from-quote/{quoteRevisionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    quoteRevisionId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ConvertQuoteRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sales/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CancelSaleRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @enum {unknown} */
+        AccountingTreatment: "OPERATING_EXPENSE" | "INVENTORY_PURCHASE" | "ASSET_ACQUISITION" | null;
         AdditionalDirectCostBreakdown: {
             description: string;
             /** Format: double */
@@ -2975,6 +3326,11 @@ export interface components {
             productSubtitle: string;
             logos: components["schemas"]["BrandingLogoResponse"][];
         };
+        CancelSaleRequest: {
+            reason: string;
+            /** Format: int64 */
+            version: number | string;
+        };
         CompanyProfileRequest: {
             legalName: string;
             tradeName: string;
@@ -3034,6 +3390,10 @@ export interface components {
             decided: number | string;
             /** Format: double */
             conversionRate: null | number | string;
+        };
+        ConvertQuoteRequest: {
+            /** Format: uuid */
+            conversionRequestId: string;
         };
         CostCalculationRequest: {
             materials: null | components["schemas"]["CostingMaterialRequest"][];
@@ -3167,6 +3527,31 @@ export interface components {
             version: number | string;
             addresses: components["schemas"]["AddressResponse"][];
         };
+        ExpenseWriteRequest: {
+            /** Format: uuid */
+            expenseCategoryId: string;
+            description: string;
+            /** Format: double */
+            amount: number | string;
+            /** Format: date */
+            incurredOn: string;
+            accountingTreatment: components["schemas"]["AccountingTreatment"];
+            /** Format: date */
+            paidOn: null | string;
+            paymentMethod: null | string;
+            supplierName: null | string;
+            documentNumber: null | string;
+            /** Format: uuid */
+            inventoryMovementId: null | string;
+            /** Format: uuid */
+            salesChannelId: null | string;
+            /** Format: uuid */
+            machineId: null | string;
+            attachmentPath: null | string;
+            notes: null | string;
+            /** Format: int64 */
+            version: null | number | string;
+        };
         FeeRuleCreateRequest: {
             name: string;
         };
@@ -3197,6 +3582,7 @@ export interface components {
             maximumFee: null | number | string;
             notes: null | string;
             closeCurrentOpenVersion: boolean;
+            priceBrackets?: null | components["schemas"]["PriceBracketCreateRequest"][];
         };
         FeeRuleVersionResponse: {
             /** Format: uuid */
@@ -3337,6 +3723,29 @@ export interface components {
             /** Format: double */
             cost: number | string;
         };
+        ManualSaleItemRequest: {
+            /** Format: uuid */
+            productId: string;
+            /** Format: double */
+            quantity: number | string;
+            /** Format: double */
+            unitPrice: number | string;
+            /** Format: double */
+            discountAmount: number | string;
+        };
+        ManualSaleRequest: {
+            /** Format: uuid */
+            salesChannelId: string;
+            /** Format: uuid */
+            customerId: null | string;
+            customerNameSnapshot: null | string;
+            /** Format: date-time */
+            soldAt: null | string;
+            /** Format: double */
+            shippingAmount: number | string;
+            notes: null | string;
+            items: components["schemas"]["ManualSaleItemRequest"][];
+        };
         MaterialCostBreakdown: {
             /** Format: uuid */
             supplyId: string;
@@ -3371,6 +3780,22 @@ export interface components {
         MaterialCostSource: "WEIGHTED_AVERAGE_ACQUISITION" | "MANUAL_OVERRIDE";
         /** @enum {unknown} */
         PersonType: "Individual" | "Company";
+        PriceBracketCreateRequest: {
+            /** Format: double */
+            minPrice: number | string;
+            /** Format: double */
+            maxPrice: null | number | string;
+            /** Format: double */
+            commissionPercent: number | string;
+            /** Format: double */
+            fixedFee: number | string;
+            /** Format: double */
+            minimumFee: null | number | string;
+            /** Format: double */
+            maximumFee: null | number | string;
+            /** Format: int32 */
+            sortOrder: number | string;
+        };
         /** @enum {unknown} */
         PriceRoundingPolicy: "CENT" | "TEN_CENTS" | "WHOLE" | "NINETY_NINE" | "NONE" | null;
         PricingCalculateRequest: {
@@ -3778,6 +4203,13 @@ export interface components {
             /** Format: double */
             effectiveMarginPercent: number | string;
             costSnapshot: components["schemas"]["QuoteItemCostSnapshotResponse"];
+            /** Format: uuid */
+            bracketId?: null | string;
+            bracketResolution?: null | string;
+            /** Format: double */
+            feeBasisAmount?: null | number | string;
+            discountApplied?: null | boolean;
+            feeClampApplied?: null | string;
         };
         QuoteListItemResponse: {
             /** Format: uuid */
@@ -3941,6 +4373,8 @@ export interface components {
             /** Format: int64 */
             version: number | string;
         };
+        /** @enum {unknown} */
+        SaleStatus: "CONFIRMED" | "CANCELED" | null;
         SettingUpdateRequest: {
             value: string;
             /** Format: int64 */

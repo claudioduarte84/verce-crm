@@ -179,6 +179,9 @@ public sealed class QuoteItemConfiguration : IEntityTypeConfiguration<QuoteItem>
         b.Property(x => x.SuggestedUnitPrice).HasColumnType($"numeric(18,{Rounding.MoneyScale})").IsRequired();
         b.Property(x => x.CommissionAmountPerUnit).HasColumnType($"numeric(18,{Rounding.MoneyScale})").IsRequired();
         b.Property(x => x.FeeClampApplied).HasMaxLength(8);
+        b.Property(x => x.BracketId);
+        b.Property(x => x.BracketResolution).HasMaxLength(24);
+        b.Property(x => x.FeeBasisAmount).HasColumnType($"numeric(18,{Rounding.MoneyScale})");
         b.Property(x => x.ManualPriceOverride).HasColumnType($"numeric(18,{Rounding.MoneyScale})");
         b.Property(x => x.PriceOverridden).IsRequired();
         b.Property(x => x.UnitPrice).HasColumnType($"numeric(18,{Rounding.MoneyScale})").IsRequired();

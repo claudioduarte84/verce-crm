@@ -40,6 +40,8 @@ export function HomePage() {
             <Link to="/cost-laboratory">Laboratório de Custos</Link>
             <Link to="/products">Produtos e receitas</Link>
             <Link to="/pricing">Precificação e canais de venda</Link>
+            <Link to="/sales">Vendas</Link>
+            <Link to="/expenses">Despesas</Link>
             <Link to="/settings">Configurações e marca</Link>
           </nav>
         </section>

@@ -37,8 +37,8 @@ public class QuoteTests
 
     private static QuoteItemSnapshot Item(decimal quantity = 1m, decimal unitCost = 10m, decimal margin = 0.35m,
         decimal? manualOverride = null, QuoteFixedFeeApplication feeApplication = QuoteFixedFeeApplication.PerUnit,
-        decimal allocatedOrderFee = 0m, decimal rawFixedFee = 0m) =>
-        new(null, null, null, "Item de teste", null, quantity, CostSnapshot(unitCost), margin, ChannelId, null, 0.10m,
+        decimal allocatedOrderFee = 0m, decimal rawFixedFee = 0m, Guid? salesChannelId = null) =>
+        new(null, null, null, "Item de teste", null, quantity, CostSnapshot(unitCost), margin, salesChannelId ?? ChannelId, null, 0.10m,
             feeApplication, rawFixedFee, allocatedOrderFee, "CENT", 20.00m, 2.00m, null, manualOverride,
             QuoteDiscountKind.None, 0m);
 
@@ -56,6 +56,21 @@ public class QuoteTests
         quote.DisplayNumberFor(quote.CurrentRevision).Should().Be(quote.Number);
         quote.Number.Should().Be("260920-1");
         quote.PendingEvents.OfType<Verce.Modules.Quoting.Contracts.QuoteCreatedEvent>().Should().ContainSingle();
+    }
+
+    [Fact]
+    public void Construction_rejects_items_from_a_different_sales_channel()
+    {
+        var act = () => NewQuote([Item(salesChannelId: ChannelId), Item(salesChannelId: Guid.NewGuid())]);
+        act.Should().Throw<ArgumentException>().WithMessage("QUOTE_MIXED_CHANNEL_NOT_SUPPORTED");
+    }
+
+    [Fact]
+    public void Construction_accepts_multiple_items_from_the_revision_sales_channel()
+    {
+        var quote = NewQuote([Item(salesChannelId: ChannelId), Item(quantity: 2m, salesChannelId: ChannelId)]);
+        quote.CurrentRevision.Items.Should().HaveCount(2);
+        quote.CurrentRevision.Items.Should().OnlyContain(x => x.SalesChannelId == quote.CurrentRevision.SalesChannelId);
     }
 
     [Fact]
