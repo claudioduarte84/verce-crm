@@ -308,10 +308,11 @@ reset on reload. See ADR-0018.
 
 ## 7. Pricing module
 
-> **S5 note ([ADR-0019](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md)).** S5
-> ships a flat `FeeRule`/`FeeRuleVersion` — one rule per channel, no scope/priority, no
-> `PriceBracket`. CALCULATION-RULES §CR-07.5 already named bracket resolution "not used before
-> S8"; this section now matches what actually exists instead of the pre-S0 aspirational shape.
+> **S8A reality ([ADR-0019](architecture/ADR-0019-s5-product-recipe-and-pricing-engine.md),
+> [ADR-0022](architecture/ADR-0022-pricing-override-discount-bracket-precedence.md)).** S5 shipped
+> one FeeRule per channel with flat versions. S8A added optional PriceBracket children and the
+> CommercialPricingEngine, while deliberately retaining one rule per channel and no
+> product/category scope or priority.
 
 ### SalesChannel (AR)
 `Id` (UUID v7), `Code` (unique, normalized upper-case), `Name`, `Kind {Direct, Marketplace,
@@ -330,14 +331,20 @@ This is deliberate: one formula, one code path, one set of tests
 
 ### FeeRule (AR) + FeeRuleVersion (*E*)
 
-`FeeRule`: `Id`, `SalesChannelId` (unique — **exactly one `FeeRule` per channel** in S5), `Name`,
-`Active`, `Version`. No `AppliesTo`, `TargetId` or `Priority` — those are S8+ (ADR-0019 §3).
+`FeeRule`: `Id`, `SalesChannelId` (unique — exactly one rule per channel), `Name`, `Active`,
+`Version`. There is no `AppliesTo`, `TargetId` or `Priority`; S8A needed price tiers, not a second
+rule-resolution hierarchy.
 
 `FeeRuleVersion`: `Id`, `FeeRuleId`, `ValidFrom: DateOnly`, `ValidUntil: DateOnly?` (half-open
 `[from, until)`), `CommissionPercent: decimal ∈ [0, 1)` (ADR-0002 fraction),
 `FixedFee: decimal ≥ 0`, `FixedFeeApplication {PerUnit, PerOrder}` (see
 [CR-07.3](CALCULATION-RULES.md#cr-073--fixed-fee-application)), `MinimumFee: decimal?`,
-`MaximumFee: decimal?`, `Notes?`. No `PriceBracket` and no `ShippingComponent` in S5.
+`MaximumFee: decimal?`, `Notes?`, zero or more immutable `PriceBracket` children. There is no
+provider shipping component in Pricing; Commerce shipping policy remains separate.
+
+`PriceBracket`: `Id`, `FeeRuleVersionId`, `MinPrice`, `MaxPrice?`, `CommissionPercent`,
+`FixedFee`, `MinimumFee?`, `MaximumFee?`, `SortOrder`. Ranges are half-open and non-overlapping;
+the final range may be open-ended.
 
 Invariants:
 - Versions of the same rule must not overlap in time — enforced by a PostgreSQL `EXCLUDE USING
@@ -347,13 +354,14 @@ Invariants:
 - `CommissionPercent ∈ [0, 1)`, `FixedFee ≥ 0`, `MinimumFee ≤ MaximumFee` when both present.
 - An inverted window (`ValidUntil ≤ ValidFrom`) is rejected at construction
   (`FEE_RULE_VERSION_INVALID_WINDOW`).
+- Brackets of one version do not overlap; `MaxPrice > MinPrice` when bounded. DIRECT versions and
+  brackets must remain zero-fee.
 
 Resolution: given `(salesChannelId, instant)`, `FeeRule.ResolveVersionAt(instant)` picks the
-single version whose `[ValidFrom, ValidUntil)` covers `instant` — no product scope, no priority,
-no bracket. Missing resolution fails with `FEE_RULE_NOT_FOUND`, never a silent zero-fee default.
-Per-product/per-category scoping and price-bracket resolution
-([CR-07.5](CALCULATION-RULES.md#cr-075--bracket-resolution-fee-depends-on-price-price-depends-on-fee))
-remain S8 scope.
+single version whose `[ValidFrom, ValidUntil)` covers `instant` — no product scope or priority.
+Missing resolution fails with `FEE_RULE_NOT_FOUND`, never a silent zero-fee default. The
+CommercialPricingEngine then resolves optional brackets under
+[CR-07.5](CALCULATION-RULES.md#cr-075--bracket-resolution-fee-depends-on-price-price-depends-on-fee).
 
 ### PricingEngine (domain service, pure)
 Input (`PricingCalculationInput`): `unitTotalCost`, `commissionPercent`, `fixedFee`,
@@ -368,6 +376,13 @@ anything — never returns a number derived from one. The rounding policy is app
 (`POST /api/pricing/products/{id}/price`) resolves `unitTotalCost` from
 `ProductCostCalculator`'s `EstimatedUnitCost` and the commission/fixed fee/min/max from
 `FeeRule.ResolveVersionAt(today)` before calling this same pure engine.
+
+### CommercialPricingEngine (domain service, pure; S8A)
+
+Wraps the S5 PricingEngine with optional PriceBracket consistency/containment resolution, manual
+price override, discount, post-discount commission basis, fee clamps and explanation metadata.
+Its normative precedence is ADR-0022 and CR-07.5/CR-07.6/CR-08. Channel comparison in S8B reuses
+this authority; Commerce does not copy its formulas.
 
 ---
 
@@ -707,8 +722,8 @@ Supplies the `company.*` bindings to every document. Fiscal modeling stays delib
 *(Replaces the `OrganizationProfile` name used before the branding addendum.)*
 
 ### BrandAssetType (lookup, not a C# enum)
-`PRIMARY_LOGO`, `COMPACT_LOGO`, `NEGATIVE_LOGO`, `SYMBOL`, `FAVICON`, `DOCUMENT_LOGO`, `OTHER`.
-Adding a type is data.
+`PRIMARY_LOGO`, `COMPACT_LOGO`, `NEGATIVE_LOGO`, `SYMBOL`, `FAVICON`, `DOCUMENT_LOGO`, `OTHER`,
+plus S8B target `PRODUCT_IMAGE`. Adding a type is data; S8B adds the row, not a C# enum member.
 
 ### BrandAsset (AR)
 `Id`, `BrandAssetTypeCode`, `Name`, `IsActive`, `CurrentVersionId`, `DeletedAt?`.
@@ -756,9 +771,129 @@ Initial keys:
 | `documents.default_warranty` | (empty) | Quoting — copied onto each revision |
 | `documents.preview_retention_days` | `30` | Documents |
 | `uploads.max_image_bytes` | `5242880` | Settings |
+| `commerce.listing_observation_retention_days` | `180` (introduced in S8B) | Commerce |
 
 `timezone` and `currency` are **not** app settings — they are fields on `CompanyProfile`,
 because they are organization facts rather than tunable behaviour.
+
+---
+
+## 14A. Commerce module — S8B target (fifteenth business module)
+
+> **Architecture freeze:** [ADR-0023](architecture/ADR-0023-s8b-commerce-foundation.md). S8B
+> owns provider-neutral commercial intent and observed listing facts. It does not call provider
+> APIs, ingest marketplace orders or create a parallel financial Sale.
+
+### ChannelOffer (AR)
+
+`Id`, `ProductId` (logical Catalog reference), `SalesChannelId` (logical Pricing reference),
+`Status {ACTIVE, INACTIVE}`, `IntendedUnitPrice`,
+`PriceSource {PRICING_ENGINE, MANUAL, IMPORTED_OBSERVED}`,
+`EstimatedSellerPaidShippingAmount?`,
+`ShippingEstimateSource {MANUAL, IMPORTED_OBSERVED, PROVIDER_SYNC}?` (S8B produces only the first
+two), `ActivatedAt?`, `DeactivatedAt?`,
+audit timestamps and `Version`.
+
+Business identity is the ordinary unique pair `(ProductId, SalesChannelId)`. Deactivation retains
+the row and does not free the pair. Activation requires the Product and SalesChannel to be active.
+Commercial activation is derived, never stored on Product:
+
+```text
+product.Active && exists ACTIVE ChannelOffer
+```
+
+`IntendedUnitPrice` is VERCE intent and is never overwritten by a listing observation. DIRECT is
+a normal ChannelOffer over the canonical Pricing channel; it has no MarketplaceAccount or
+MarketplaceListing.
+
+### MarketplaceProvider (reference data)
+
+Textual codes `MERCADO_LIVRE`, `SHOPEE`, `TIKTOK_SHOP`. DIRECT is not a provider. Provider
+capability state is separate from account grant state and uses the closed vocabulary
+`LISTINGS_READ`, `LISTINGS_WRITE`, `ORDERS_READ`, `FEES_QUOTE`, `ANALYTICS_READ`, `ADS_READ`,
+`SHIPPING_READ`, `INVENTORY_SYNC`.
+
+### MarketplaceAccount (AR)
+
+`Id`, `ProviderCode`, `SalesChannelId`, `DisplayName`, `ExternalAccountId`, `Active`,
+`CredentialReference?`, `ConnectionState {NOT_CONFIGURED, DISCONNECTED, CONNECTED, ERROR}`,
+`SyncState {NEVER_SYNCED, SYNCED, ERROR}`, last-success/attempt/failure metadata, audit timestamps
+and `Version`.
+
+Business identity is `(ProviderCode, ExternalAccountId)`; multiple accounts for one provider are
+valid. Credentials are external protected configuration referenced by identifier, never raw token
+columns. At creation, `SalesChannelId` must resolve to an active Pricing channel with
+`Kind = Marketplace` and code other than `DIRECT`. It is immutable thereafter; deactivation
+blocks provider work but preserves the channel mapping, listings and ChannelOffer intent.
+
+Effective capability is provider `SUPPORTED` intersected with account `GRANTED` on an active
+account. Structural provider state is `UNKNOWN|SUPPORTED|UNSUPPORTED`; account grant is
+`UNKNOWN|GRANTED|DENIED`. Transient failure is connection/sync/runtime health, not capability or
+grant mutation, and may block execution without rewriting those structural facts.
+
+### MarketplaceListing (AR)
+
+`Id`, `MarketplaceAccountId`, `ExternalListingId`, `ExternalSku?`, `ProductId?`,
+`ChannelOfferId?`, `TitleSnapshot?`, `ObservedPrice?`, `ListingUrl?`,
+`ObservedStatus {DRAFT, ACTIVE, PAUSED, INACTIVE, ERROR}`, `ProviderNativeStatus?`,
+`LinkageState {UNLINKED, NEEDS_REVIEW, LINKED}`, `SyncState {NEVER_SYNCED, SYNCED, ERROR}`,
+`ProviderObservedAt?`, `LastSyncAttemptAt?`, `LastSuccessfulSyncAt?`, bounded/redacted
+`SyncError?`, audit timestamps and `Version`.
+
+Business identity is the ordinary unique pair `(MarketplaceAccountId, ExternalListingId)`.
+Product is nullable so `Não vinculadas` is first-class. LINKED requires ProductId; UNLINKED and
+NEEDS_REVIEW require both ProductId and ChannelOfferId null. A linked Product may have null
+ChannelOfferId until commercial intent is explicitly connected/created. Non-null ChannelOfferId
+requires LINKED and must identify that Product × the account's immutable SalesChannel. Same-schema
+FKs prove existence; Commerce validation proves Product/channel equality. Observed state, linkage
+and sync are independent: `ACTIVE + LINKED + ERROR` is valid. Unlinking never deletes the listing
+or its external identity.
+
+### MarketplaceListingObservation (*E*, append-only)
+
+Safe normalized snapshot of material listing changes: listing identity, title/external SKU,
+observed price/status, bounded native status, provenance `MANUAL|IMPORTED|PROVIDER_SYNC`,
+provider-observed time, ingestion time, idempotent `ObservationKey` and a safe-fact fingerprint.
+It contains no raw provider body. Consecutive identical freshness polls do not append duplicates,
+while a material `A -> B -> A` sequence remains visible. Retention is
+`commerce.listing_observation_retention_days` (180), always preserving the latest observation,
+current listing and audit/link history.
+
+### ProductCommercialProfile (AR), ProductCommercialImage (*E*) and CommercialTag (AR)
+
+`ProductCommercialProfile` has ordinary unique logical `ProductId`, timestamps and `Version`; it
+owns the Product's presentation without duplicating name, SKU, active state or recipe.
+`ProductCommercialImage` maps that profile to a logical Settings `BrandAssetId`, role
+`PRIMARY|GALLERY`, sort order and optional alt text. At most one PRIMARY exists per profile. The
+asset must be type `PRODUCT_IMAGE` and uses Settings' validated PNG/JPEG/WebP,
+content-addressed/versioned pipeline; Commerce stores no path or bytes.
+
+`CommercialTag` has `Id`, normalized unique `Code`, `Name`, `Active` and `Version`. Composite join
+tables assign tags to ProductCommercialProfile (the unique Product presentation) and same-module
+MarketplaceListings. Natal, Páscoa and similar concepts are data rows, never hardcoded booleans.
+Campaign budgets/windows are out of scope.
+
+### Read compositions and application ports
+
+Commercial Catalog is Product-centric and composes Product, image/tags, offers, current estimated
+cost, channel economics and canonical Sale metrics. Sale metrics return nullable units/revenue
+plus `SalesMetricCoverage {COMPLETE, PARTIAL, UNKNOWN}` for the requested interval/source set.
+Manual marketplace Sales are factual but cannot establish COMPLETE coverage before effective
+ORDERS_READ, successful sync and full interval/source coverage; PARTIAL returns known facts and
+UNKNOWN returns null rather than authoritative zero. DIRECT rows are authoritative for
+transactions recorded in VERCE, not for unrecorded real-world activity. Published Items is
+listing-centric, one row per MarketplaceListing. Both are SQL-paginated/filterable/sortable read
+models, not duplicated master tables.
+
+Commerce application services depend on provider-neutral ports implemented in the composition
+root for Product facts/cost, Pricing fee resolution and Sales aggregates. `IChannelFeeProvider`
+returns normalized fee facts and provenance `LIVE_API|CACHE|MANUAL|FALLBACK`; S8B implements only
+the local FeeRule adapter (`MANUAL`, or explicit configured `FALLBACK`). Provider HTTP adapters
+and a provider-fee cache are deferred until S8C.0 discovery.
+
+Mutable roots use expected `Version` and the existing audit infrastructure. Permissions are
+`commerce:read` (Owner/Operator/Viewer), `commerce:manage` (Owner/Operator) and
+`commerce:accounts:manage` (Owner).
 
 ---
 
@@ -828,3 +963,15 @@ aggregates.
     alter an issued document.
 16. No template can bind `internal_notes`, a unit cost or a margin field — those paths are
     absent from the `QUOTE` binding catalogue.
+17. At most one ChannelOffer exists for one Product × SalesChannel, regardless of status.
+18. Commercial activation is derived from active Product + active ChannelOffer; Product carries
+    no duplicated commercial-active flag.
+19. MarketplaceListing external identity is never reused after deactivation, unlink or error.
+20. A listing observation never silently overwrites ChannelOffer intent.
+21. Fuzzy or ambiguous listing identity never auto-links a Product or activates an offer.
+22. DIRECT never has a fake provider, MarketplaceAccount or MarketplaceListing.
+23. Provider capability and account grant remain separate; effective capability is their
+    intersection for an active account.
+24. Commerce stores no raw credential and no arbitrary provider payload.
+25. Missing energy, shipping, stock, WIP or actual-cost facts are unavailable/partial, never
+    fabricated as zero.

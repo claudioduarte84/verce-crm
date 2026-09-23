@@ -582,6 +582,98 @@ decision alongside the facts and stops the noise.
 Retry delivery is at-least-once, so **every consumer must be idempotent** — document renders key
 on `render_request_id` so a retry cannot produce a second `ISSUED` document.
 
+### 5.6 ChannelOffer (S8B target)
+
+```text
+INACTIVE ──activate──► ACTIVE ──deactivate──► INACTIVE
+```
+
+| Transition | Guards | Effects |
+|---|---|---|
+| create ACTIVE | Product active; SalesChannel active; positive intended price; unique Product × channel | set `ActivatedAt`; audit |
+| create INACTIVE | referenced identities exist; positive intended price; unique Product × channel | retained planning record; audit |
+| INACTIVE → ACTIVE | expected Version; Product and SalesChannel active | set current `ActivatedAt`, clear current `DeactivatedAt`; audit |
+| ACTIVE → INACTIVE | expected Version | set `DeactivatedAt`; preserve identity/history; audit |
+
+Product or SalesChannel deactivation does not delete or rewrite ChannelOffer. Product
+deactivation makes the exact product-level commercial-active fact false. SalesChannel
+deactivation leaves offer intent/status unchanged but blocks new activation, publication and
+commercial operations on that channel; historical labels remain resolvable. DIRECT follows this
+same machine without any marketplace account/listing side effect.
+
+### 5.7 MarketplaceAccount (S8B target)
+
+Account enablement, connection and sync are separate dimensions:
+
+```text
+ACTIVE ──deactivate──► INACTIVE ──activate──► ACTIVE
+
+NOT_CONFIGURED ──configure──► DISCONNECTED ──connect──► CONNECTED
+                                  ▲    │                    │
+                                  │    └────failure────────► ERROR
+                                  └────────disconnect───────┘
+
+NEVER_SYNCED ──successful sync──► SYNCED
+      │                              │
+      └────failed attempt──────────► ERROR
+                                     │
+                                     └──successful retry──► SYNCED
+```
+
+S8B represents these states but performs no provider connection or sync. Creation requires an
+existing active Pricing SalesChannel with `Kind = Marketplace` and code other than `DIRECT`.
+SalesChannelId is immutable after creation. Deactivation blocks new provider operations and
+preserves that channel mapping, external account identity, listings and ChannelOffer intent.
+Credential rotation never changes account identity. Expected Version and audit apply to all
+operator mutations.
+
+Capability support (`UNKNOWN|SUPPORTED|UNSUPPORTED`) and account grant
+(`UNKNOWN|GRANTED|DENIED`) are structural facts outside these transient machines. Connection or
+sync failure may block execution but never changes SUPPORTED to UNSUPPORTED or GRANTED to DENIED.
+
+### 5.8 MarketplaceListing observed status and linkage (S8B target)
+
+Observed status is normalized provider reality:
+
+```text
+DRAFT | ACTIVE | PAUSED | INACTIVE | ERROR
+```
+
+Provider observations may move between these values; this is not VERCE's ChannelOffer state.
+Native status is a separate bounded code.
+
+Linkage is independent:
+
+```text
+UNLINKED ──ambiguous candidates──► NEEDS_REVIEW
+    │                                  │
+    └──verified/operator link──────────┴──► LINKED
+LINKED ──operator unlink/correction────────► UNLINKED
+```
+
+Only deterministic verified identity or explicit operator choice enters LINKED. LINKED requires
+ProductId; ChannelOfferId may be null while commercial intent is not yet connected. UNLINKED and
+NEEDS_REVIEW require both ProductId and ChannelOfferId null, so fuzzy/multiple candidates never
+persist a guessed link. A non-null ChannelOfferId requires LINKED and must resolve to the same
+Product and the account's immutable SalesChannel. Unlink preserves listing identity and
+observation history. Connecting or creating a ChannelOffer is a distinct explicit audited choice;
+an existing offer is never overwritten.
+
+### 5.9 MarketplaceListing sync state (S8B target)
+
+```text
+NEVER_SYNCED ──successful sync──► SYNCED
+      │                              │
+      └────failed attempt──────────► ERROR
+                                     │
+                                     └──successful retry──► SYNCED
+```
+
+`ACTIVE` observed status with sync `ERROR` is valid: the former is the last known provider fact,
+the latter is freshness/transport health. S8B manual observations normally remain NEVER_SYNCED;
+real transitions begin only after S8C.0 and connector implementation. Error text is redacted and
+bounded; no secret-bearing response body is stored.
+
 ---
 
 ## 6. Error codes emitted by transitions
@@ -601,6 +693,15 @@ on `render_request_id` so a retry cannot produce a second `ISSUED` document.
 | `CONCURRENCY_CONFLICT` | 409 | The aggregate changed since it was loaded ([ADR-0011 §2](architecture/ADR-0011-identifiers-and-concurrency.md)) |
 | `LAST_OWNER_PROTECTED` | 409 | Attempt to remove, deactivate or demote the last active Owner |
 | `DOMAIN_EVENT_WAVE_LIMIT_EXCEEDED` | 500 | Event cycle detected; programming error, transaction rolled back |
+| `CHANNEL_OFFER_ALREADY_EXISTS` | 409 | Product and SalesChannel already have their durable ChannelOffer |
+| `CHANNEL_OFFER_ACTIVATION_BLOCKED` | 409 | Product or SalesChannel is inactive, so the offer cannot activate |
+| `COMMERCE_CAPABILITY_UNAVAILABLE` | 409 | Structural provider support or account grant is absent/unknown |
+| `COMMERCE_OPERATION_UNAVAILABLE` | 503 | Runtime provider/account health currently blocks an otherwise permitted operation |
+| `MARKETPLACE_ACCOUNT_INACTIVE` | 409 | A provider operation was requested for an inactive account |
+| `MARKETPLACE_ACCOUNT_CHANNEL_INVALID` | 422 | Account creation referenced a missing, inactive, non-Marketplace or DIRECT channel |
+| `MARKETPLACE_ACCOUNT_CHANNEL_IMMUTABLE` | 409 | Attempted to change an existing account's SalesChannelId |
+| `LISTING_LINKAGE_CONFLICT` | 409 | Link/unlink expected Version or Product/offer consistency failed |
+| `LISTING_LINKAGE_AMBIGUOUS` | 422 | Candidate identity is fuzzy or non-unique and requires operator review |
 
 Codes are stable strings; the frontend maps them to pt-BR messages. Message text is never
 matched programmatically.

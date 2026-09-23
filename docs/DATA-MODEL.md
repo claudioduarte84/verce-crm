@@ -335,7 +335,7 @@ Audited. Seeded keys are listed in [DOMAIN-MODEL §14](DOMAIN-MODEL.md#14-settin
 
 ### `settings.brand_asset_type` — lookup
 `code text` **PK** (`PRIMARY_LOGO`, `COMPACT_LOGO`, `NEGATIVE_LOGO`, `SYMBOL`, `FAVICON`,
-`DOCUMENT_LOGO`, `OTHER`), `name text`, `is_active boolean`.
+`DOCUMENT_LOGO`, `OTHER`; S8B adds `PRODUCT_IMAGE`), `name text`, `is_active boolean`.
 
 ### `settings.brand_asset` — **SD**
 `id uuid` **PK**, `brand_asset_type_code text` **FK** restrict, `name text not null`,
@@ -505,55 +505,50 @@ migration does not need to widen it) but are not producible by any S3 endpoint.
 
 ## 5. `catalog` schema
 
-### `catalog.product_category`
-`id` **PK**, `name` **U**, `is_active`.
+### `catalog.product_category` — not shipped
+
+The original S0 sketch included ProductCategory, but S5 did not create this table. S8B does not
+depend on it; commercial grouping uses Commerce tags until a separately justified Catalog
+category feature exists.
 
 ### `catalog.product` — **SD**
-`id` **PK**, `sku text null`, `name text not null`, `description`, `product_category_id` **FK** null,
-`image_path`, `default_sales_channel_id uuid null` (cross-module, restrict),
-`default_margin_percent numeric(9,6) null`, `current_recipe_id uuid null`,
-`is_active`, `deleted_at`.
+`id uuid` **PK**, `code text` **U**, `name text`, `description text null`, `active boolean`,
+`version bigint`, `creation_sequence bigint` **U** (database-generated internal pagination
+tie-breaker), standard audit metadata.
 
-- **U** partial `(sku) WHERE sku IS NOT NULL AND deleted_at IS NULL`.
-- **IX** `gin (name gin_trgm_ops)`, `(product_category_id)`.
-- `current_recipe_id` is a deferrable FK to `product_recipe` (circular pair) — created as
-  `DEFERRABLE INITIALLY DEFERRED`.
+- **IX** `gin (name gin_trgm_ops)`, `(active)`.
+- Product has no image path, default channel, margin or category column. S8B presentation lives
+  in Commerce and Pricing remains channel/fee authority.
 
 ### `catalog.product_recipe`
 | Column | Type | Notes |
 |---|---|---|
 | id | uuid | **PK** |
-| product_id | uuid | **FK** cascade |
-| revision_number | int | not null |
-| is_current | boolean | not null |
-| effective_from | date | not null |
-| print_duration_seconds | int | not null **CHECK** `>= 0` |
-| machine_id | uuid | null (cross-module) |
-| estimated_energy_kwh | numeric(12,4) | null |
-| labor_minutes | int | not null default 0 |
-| labor_hourly_rate | numeric(18,6) | null |
-| wastage_rate | numeric(9,6) | not null default 0, **CHECK** `>= 0 AND < 1` |
-| post_processing_notes | text | null |
+| product_id | uuid | **FK** cascade, **U** — exactly one current recipe |
+| revision_number | int | fixed at 1 until a future revision trigger exists |
+| wastage_percent_override | numeric(9,6) | percentage points, null inherits Setting |
+| labor_minutes | numeric(14,4) | null |
+| labor_hourly_rate_override | numeric(18,6) | null |
+| machine_minutes | numeric(14,4) | null |
+| machine_hourly_rate | numeric(18,6) | null |
+| output_quantity | int | not null, `>= 1` by domain invariant |
 | notes | text | null |
 
-- **U** `(product_id, revision_number)`.
-- **U** partial `(product_id) WHERE is_current` — exactly one current recipe.
+### `catalog.product_recipe_material_line`
 
-### `catalog.product_filament_component`
-`id` **PK**, `product_recipe_id` **FK** cascade, `filament_id` **FK** restrict,
-`grams_used numeric(12,3) not null CHECK > 0`, `allow_substitution boolean default false`,
-`note`, `sort_order int`.
-**IX** `(product_recipe_id, sort_order)`, `(filament_id)`.
-**No unique constraint on `(recipe, filament)`** — the same filament may legitimately appear
-twice (two parts, two notes).
+`id` **PK**, `product_recipe_id` **FK** cascade, `supply_id uuid` logical Inventory reference,
+`entered_quantity numeric(18,8)`, `entered_unit text`,
+`normalized_quantity_base_unit numeric(14,4)`, `wastage_percent_override numeric(9,6) null`,
+`manual_unit_cost_override numeric(18,6) null`, `sort_order int`.
 
-### `catalog.product_supply_component`
-`id` **PK**, `product_recipe_id` **FK** cascade, `supply_id` **FK** restrict,
-`quantity numeric(14,4) not null CHECK > 0`, `note`, `sort_order`.
+**IX** `(product_recipe_id, sort_order)`, `(supply_id)`. Duplicate Supply lines are valid.
 
-### `catalog.product_cost_line`
-`id` **PK**, `product_recipe_id` **FK** cascade, `description text not null`,
-`amount numeric(18,6) not null CHECK >= 0`, `cost_kind text`, `sort_order`.
+### `catalog.product_recipe_additional_cost_line`
+
+`id` **PK**, `product_recipe_id` **FK** cascade, `description text`,
+`amount numeric(18,6) CHECK >= 0`, `sort_order int`.
+
+**IX** `(product_recipe_id, sort_order)`.
 
 ---
 
@@ -590,16 +585,25 @@ twice (two parts, two notes).
 
 ## 7. `pricing` schema
 
-### `pricing.sales_channel` — **SD**
-`id` **PK**, `name` **U** (where not deleted), `kind text` **CHECK** (`DIRECT|MARKETPLACE|OTHER`),
-`code text null`, `default_margin_percent numeric(9,6) null`, `is_active`, `deleted_at`, `notes`.
+### `pricing.sales_channel`
+
+`id uuid` **PK**, `code varchar(40) not null`, `name varchar(200) not null`, `kind varchar(16)`
+**CHECK** (`Direct|Marketplace|Other`), `default_margin_percent numeric(9,6) null`,
+`notes varchar(2000) null`, `active boolean`, `version bigint`, standard audit metadata.
+
+- **U** `(code)`; **IX** `(active)`.
+- There is no `deleted_at`: channels activate/deactivate and historical UUID references remain
+  resolvable. The domain reserves code `DIRECT` bidirectionally for `Kind = Direct`.
 
 ### `pricing.fee_rule`
-`id` **PK**, `sales_channel_id` **FK** cascade, `name text`, `applies_to text` **CHECK**
-(`ALL_PRODUCTS|PRODUCT_CATEGORY|PRODUCT`), `target_id uuid null`, `priority int not null default 0`,
-`is_active boolean`.
-**CHECK** `(applies_to = 'ALL_PRODUCTS') = (target_id IS NULL)`.
-**IX** `(sales_channel_id, is_active, priority desc)`.
+
+`id uuid` **PK**, `sales_channel_id uuid not null` (same-module logical identity; no physical FK
+in the shipped model), `name varchar(200)`, `active boolean`, `version bigint`, standard audit
+metadata.
+
+- **U** `(sales_channel_id)` — exactly one FeeRule per SalesChannel.
+- There is no `applies_to`, `target_id` or `priority`; resolution never chooses among competing
+  rules for one channel.
 
 ### `pricing.fee_rule_version`
 | Column | Type | Notes |
@@ -608,24 +612,35 @@ twice (two parts, two notes).
 | fee_rule_id | uuid | **FK** cascade |
 | valid_from | date | not null |
 | valid_until | date | null |
-| commission_percent | numeric(9,6) | not null **CHECK** `>= 0 AND < 1` |
-| fixed_fee | numeric(18,2) | not null **CHECK** `>= 0` |
-| fixed_fee_application | text | **CHECK** `PER_UNIT` / `PER_ORDER`, default `PER_UNIT` |
+| commission_percent | numeric(9,6) | not null; domain validates `>= 0 AND < 1` |
+| fixed_fee | numeric(18,6) | not null; domain validates `>= 0` and money precision |
+| fixed_fee_application | varchar(16) | **CHECK** `PerUnit|PerOrder` |
 | minimum_fee | numeric(18,6) | null |
 | maximum_fee | numeric(18,6) | null |
-| shipping_component | numeric(18,2) | null (reserved) |
-| notes | text | null |
+| notes | varchar(2000) | null |
 
 - **EXCLUDE USING gist** `(fee_rule_id WITH =, daterange(valid_from, valid_until, '[)') WITH &&)`.
+- **IX** `(fee_rule_id, valid_from)`.
 - `minimum_fee <= maximum_fee` when both are present is enforced by the `FeeRuleVersion` domain
-  constructor; the shipped database has no corresponding SQL `CHECK`.
+  constructor; the shipped database has no corresponding SQL `CHECK`. Versions are immutable
+  commercial history once superseded.
 
 ### `pricing.price_bracket`
-`id` **PK**, `fee_rule_version_id` **FK** cascade, `min_price numeric(18,2) not null`,
-`max_price numeric(18,2) null`, `commission_percent numeric(9,6)`, `fixed_fee numeric(18,2)`,
-`minimum_fee`, `maximum_fee`, `sort_order int`.
+
+`id uuid` **PK**, `fee_rule_version_id uuid` **FK** cascade,
+`min_price numeric(18,2)`, `max_price numeric(18,2) null`,
+`commission_percent numeric(9,6)`, `fixed_fee numeric(18,2)`,
+`minimum_fee numeric(18,2) null`, `maximum_fee numeric(18,2) null`, `sort_order int`.
+
 - **EXCLUDE USING gist** `(fee_rule_version_id WITH =, numrange(min_price, max_price, '[)') WITH &&)`.
-- **CHECK** `max_price IS NULL OR max_price > min_price`.
+- **U** `(fee_rule_version_id, sort_order)`.
+- **CHECKS** `min_price >= 0`; bounded `max_price > min_price`; commission in `[0,1)`;
+  `fixed_fee >= 0`; `minimum_fee <= maximum_fee` when both exist.
+- Brackets use half-open containment `[min_price, max_price)`; a null max is the open-ended final
+  interval. PostgreSQL prevents overlapping intervals inside one FeeRuleVersion.
+
+PriceBracket selection, override and discount reuse the shipped S8A CommercialPricingEngine.
+Nothing in this current-model correction reprices an issued QuoteRevision or historical Sale.
 
 ---
 
@@ -968,8 +983,8 @@ Same shape as `quote_status_history`, keyed by `production_order_id`.
 ## 11. `sales` schema
 
 ### `sales.sale`
-> **S8A target (not shipped).** Cross-module identities below are plain UUIDs, never physical
-> FKs. The target migration is `AddS8ASalesAndExpenses`.
+> **Shipped in S8A.** Cross-module identities below are plain UUIDs, never physical FKs. The
+> migration is `20260922154716_AddS8ASalesAndExpenses`.
 
 `id` **PK**, `sale_number text` **U**, `customer_id uuid null`, `customer_name_snapshot text`,
 `sales_channel_id uuid`, `quote_revision_id uuid null`, `conversion_request_id uuid null` **U**,
@@ -1005,7 +1020,7 @@ reconciled with actual consumption ([ADR-0006](architecture/ADR-0006-estimated-v
 `quote_item_id uuid null`.
 **IX** `(product_id)`, **U** `(sale_id, line_number)`.
 
-### `sales.sale_status_history` — S8A target
+### `sales.sale_status_history`
 `id` **PK**, `sale_id uuid` (same-module FK cascade), `from_status text null`, `to_status text`
 **CHECK** (`CONFIRMED|CANCELED`), `changed_at timestamptz`, `changed_by uuid null`,
 `reason text null`. Cancellation requires the reason; business history complements generic audit.
@@ -1176,6 +1191,175 @@ Materialization becomes justified only when a measured query exceeds ~500 ms.
 
 ---
 
+## 15A. `commerce` schema — S8B target
+
+> Defined by [ADR-0023](architecture/ADR-0023-s8b-commerce-foundation.md). These tables are the
+> future S8B migration plan; this architecture delivery creates no migration. Commercial Catalog
+> and Published Items are read compositions and therefore have no mirror tables.
+
+### `commerce.marketplace_provider` — reference data
+
+`code text` **PK** (`MERCADO_LIVRE|SHOPEE|TIKTOK_SHOP`), `name text`, `is_active boolean`.
+DIRECT is absent by design.
+
+### `commerce.marketplace_provider_capability`
+
+`provider_code text` **FK** restrict, `capability_code text`, `state text`
+**CHECK** (`UNKNOWN|SUPPORTED|UNSUPPORTED`),
+`source text` **CHECK** (`MANUAL|DISCOVERY`), `verified_at timestamptz null`, `updated_at`.
+
+- **PK** `(provider_code, capability_code)`.
+- `capability_code` **CHECK** in `LISTINGS_READ|LISTINGS_WRITE|ORDERS_READ|FEES_QUOTE|`
+  `ANALYTICS_READ|ADS_READ|SHIPPING_READ|INVENTORY_SYNC`.
+
+### `commerce.channel_offer` — aggregate root
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | **PK** |
+| `product_id` | uuid | required logical Catalog reference |
+| `sales_channel_id` | uuid | required logical Pricing reference |
+| `status` | text | **CHECK** `ACTIVE|INACTIVE` |
+| `intended_unit_price` | numeric(18,2) | **CHECK** `> 0` |
+| `price_source` | text | **CHECK** `PRICING_ENGINE|MANUAL|IMPORTED_OBSERVED` |
+| `estimated_seller_paid_shipping_amount` | numeric(18,2) null | **CHECK** `>= 0` when present; null means unavailable |
+| `shipping_estimate_source` | text null | **CHECK** `MANUAL|IMPORTED_OBSERVED|PROVIDER_SYNC`; S8B writes only the first two |
+| `activated_at` / `deactivated_at` | timestamptz null | state timestamps |
+| `created_at` / `updated_at` | timestamptz | audit timestamps |
+| `version` | bigint | optimistic concurrency, starts at 1 |
+
+- **U** `(product_id, sales_channel_id)` — ordinary, never status-filtered.
+- **CHECK** shipping amount and source are both null or both non-null.
+- Transition invariant: ACTIVE has `activated_at`; deactivation sets `deactivated_at`, and a
+  later activation clears the current deactivation timestamp. Transition/audit history, rather
+  than a declarative row CHECK, proves whether an INACTIVE offer has ever been activated.
+- **IX** `(product_id)`, `(sales_channel_id, status)`, `(status, updated_at desc)`.
+
+### `commerce.marketplace_account` — aggregate root
+
+`id uuid` **PK**, `provider_code text` **FK** restrict, `sales_channel_id uuid` immutable logical
+Pricing reference, `display_name text`, `external_account_id text`, `is_active boolean`,
+`credential_reference text null`, `connection_state text`
+**CHECK** (`NOT_CONFIGURED|DISCONNECTED|CONNECTED|ERROR`), `sync_state text`
+**CHECK** (`NEVER_SYNCED|SYNCED|ERROR`), `last_sync_attempt_at`, `last_successful_sync_at`,
+`last_failure_at`, `last_error text null`, `created_at`, `updated_at`, `version bigint`.
+
+- **U** `(provider_code, external_account_id)` — permits multiple accounts for one provider,
+  never reuse of the same shop identity.
+- **IX** `(sales_channel_id, is_active)`, `(provider_code, is_active)`, `(sync_state)`.
+- `last_error` is redacted and bounded to 1000 characters; no raw HTTP body.
+- `credential_reference` is an opaque protected-configuration identifier, never a token.
+- Creation validates an existing active SalesChannel with `Kind = Marketplace` and code other
+  than `DIRECT`. Later SalesChannelId mutation is rejected; deactivation preserves the mapping.
+
+### `commerce.marketplace_account_capability`
+
+`marketplace_account_id uuid` **FK** cascade, `capability_code text`, `state text`
+**CHECK** (`UNKNOWN|GRANTED|DENIED`), `updated_at`, `verified_at null`.
+
+- **PK** `(marketplace_account_id, capability_code)`.
+- Same closed capability-code check as provider capabilities.
+- Effective capability is a query intersection, not a persisted boolean.
+
+### `commerce.marketplace_listing` — aggregate root
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | **PK** |
+| `marketplace_account_id` | uuid | **FK** restrict |
+| `external_listing_id` | text | required durable external identity |
+| `external_sku` | text null | provider/account-scoped matching input |
+| `product_id` | uuid null | logical Catalog reference; null is first-class |
+| `channel_offer_id` | uuid null | same-schema **FK** restrict |
+| `title_snapshot` | text null | bounded current observed title |
+| `observed_price` | numeric(18,2) null | **CHECK** `> 0` when present |
+| `observed_status` | text | **CHECK** `DRAFT|ACTIVE|PAUSED|INACTIVE|ERROR` |
+| `provider_native_status` | text null | bounded native code, not payload |
+| `listing_url` | text null | validated absolute HTTP(S) URL |
+| `linkage_state` | text | **CHECK** `UNLINKED|NEEDS_REVIEW|LINKED` |
+| `sync_state` | text | **CHECK** `NEVER_SYNCED|SYNCED|ERROR` |
+| `provider_observed_at` | timestamptz null | provider freshness |
+| `last_sync_attempt_at` | timestamptz null | execution time |
+| `last_successful_sync_at` | timestamptz null | successful execution time |
+| `sync_error` | text null | redacted, max 1000 characters |
+| `created_at` / `updated_at` | timestamptz | record timestamps |
+| `version` | bigint | optimistic concurrency |
+
+- **U** `(marketplace_account_id, external_listing_id)` — ordinary and durable.
+- **CHECK** `(linkage_state = 'LINKED' AND product_id IS NOT NULL) OR
+  (linkage_state IN ('UNLINKED','NEEDS_REVIEW') AND product_id IS NULL AND channel_offer_id IS NULL)`.
+- **CHECK** `channel_offer_id IS NULL OR linkage_state = 'LINKED'`.
+- A linked Product with null ChannelOfferId is valid. If ChannelOfferId is present, Commerce
+  application/domain validation verifies its ProductId equals the listing ProductId and its
+  SalesChannelId equals the account's immutable SalesChannelId; a SQL CHECK cannot inspect those
+  related rows.
+- **IX** `(product_id)`, `(channel_offer_id)`, `(observed_status, updated_at desc)`,
+  `(linkage_state, updated_at desc)`, `(sync_state, last_sync_attempt_at desc)`,
+  `(marketplace_account_id, external_sku)`.
+
+### `commerce.marketplace_listing_observation` — append-only owned history
+
+`id uuid` **PK**, `marketplace_listing_id uuid` **FK** cascade, `external_sku`, `title_snapshot`,
+`observed_price numeric(18,2) null`, `observed_status`, `provider_native_status`,
+`provenance text` **CHECK** (`MANUAL|IMPORTED|PROVIDER_SYNC`), `provider_observed_at null`,
+`ingested_at timestamptz`, `observation_key text`, `safe_fact_fingerprint char(64)`.
+
+- **U** `(marketplace_listing_id, observation_key)` makes retry of the same manual/import/sync
+  observation idempotent. The key is an application request/import item key in S8B and may later
+  be a provider event or account-poll execution key after S8C.0 discovery.
+- `safe_fact_fingerprint` is indexed/compared with the latest row to skip freshness-only polls,
+  but is deliberately not unique: material history `A -> B -> A` must retain the later A.
+- **IX** `(marketplace_listing_id, provider_observed_at desc, ingested_at desc)`.
+- Retention uses `commerce.listing_observation_retention_days` (180) and always retains the
+  latest row per listing. There is no raw payload column.
+
+### `commerce.product_commercial_profile` — aggregate root
+
+`id uuid` **PK**, `product_id uuid` logical Catalog reference, `created_at`, `updated_at`,
+`version bigint`; **U** `(product_id)`. This row owns commercial presentation only and does not
+duplicate Product name, SKU, active state or recipe.
+
+### `commerce.product_commercial_image` — owned by commercial profile
+
+`id uuid` **PK**, `product_commercial_profile_id uuid` **FK** cascade,
+`brand_asset_id uuid` logical Settings reference, `role text` **CHECK** (`PRIMARY|GALLERY`),
+`sort_order int CHECK >= 0`, `alt_text text null`.
+
+- **U** `(product_commercial_profile_id, brand_asset_id)`.
+- **U** partial `(product_commercial_profile_id) WHERE role = 'PRIMARY'`.
+- **IX** `(product_commercial_profile_id, sort_order)`.
+- The asset must resolve to Settings type `PRODUCT_IMAGE`; Settings owns bytes and versions.
+
+### `commerce.commercial_tag` and assignments
+
+`commercial_tag`: `id uuid` **PK**, `code text` **U**, `name text`, `is_active boolean`,
+`version bigint`.
+
+`product_commercial_profile_tag`: composite **PK** `(product_commercial_profile_id, tag_id)`,
+same-schema **FKs** cascade/restrict.
+
+`marketplace_listing_tag`: composite **PK** `(marketplace_listing_id, tag_id)`, same-schema
+**FKs** cascade/restrict.
+
+No season/campaign boolean or campaign budget/date-window table exists in S8B.
+
+### Commercial Catalog Sales metric coverage — read-model fact
+
+Catalog returns nullable `units_sold`/`revenue` plus `sales_coverage`
+**CHECK-equivalent vocabulary** (`COMPLETE|PARTIAL|UNKNOWN`) in its response contract; this is a
+computed read fact, not a table column. Manual marketplace Sale rows yield known facts with
+PARTIAL coverage while provider sources/ranges remain uncovered. No authoritative evidence yields
+UNKNOWN and null metrics, not external zero. COMPLETE marketplace coverage is reserved for later
+effective ORDERS_READ, successful sync and complete interval/source coverage.
+
+### Tables deliberately absent in S8B
+
+There is no `commercial_catalog`, `published_item`, `publication_request`, `marketplace_order`,
+provider-specific listing table or provider-fee cache. The first two are read compositions; the
+others belong after S8C.0 provider discovery.
+
+---
+
 ## 16. Cross-module foreign keys
 
 These FKs cross schema boundaries. They are created at database level with `ON DELETE RESTRICT`
@@ -1183,8 +1367,6 @@ and generate **no** EF navigation property (ARCHITECTURE §3.1).
 
 | From | To |
 |---|---|
-| `catalog.product_recipe.machine_id` | `energy.machine.id` |
-| `catalog.product.default_sales_channel_id` | `pricing.sales_channel.id` |
 | `quoting.quote.customer_id` | `customers.customer.id` |
 | `quoting.quote_item.product_id` | `catalog.product.id` |
 | `production.production_order.quote_revision_id` | `quoting.quote_revision.id` |
@@ -1204,6 +1386,15 @@ Logical cross-module reference (no physical FK):
   account; Sales defines no physical cross-module FK.
 - `finance.expense.inventory_movement_id` is a nullable plain UUID reference to Inventory's
   PurchaseReceipt `InventoryMovement`; Finance defines no physical cross-module FK.
+- `commerce.channel_offer.product_id`, `commerce.marketplace_listing.product_id` and
+  `commerce.product_commercial_profile.product_id` are logical references to Catalog `Product`.
+- `commerce.channel_offer.sales_channel_id` and `commerce.marketplace_account.sales_channel_id`
+  are logical references to Pricing `SalesChannel`.
+- `commerce.product_commercial_image.brand_asset_id` is a logical reference to Settings
+  `BrandAsset`; the composition root validates type `PRODUCT_IMAGE` and active state.
+- Commerce-to-Commerce relationships (`Listing -> Account/Offer/Observation`, profile images and
+  tag assignments) use physical same-schema FKs. No S8B table creates a physical FK into another
+  module schema.
 
 Deliberate exceptions:
 
@@ -1216,16 +1407,18 @@ Deliberate exceptions:
 
 ---
 
-## 17. Seed data (S1/S2)
+## 17. Seed and reference data
 
 | Table | Seed |
 |---|---|
 | `settings.app_setting` | the key list in DOMAIN-MODEL §14 |
 | `settings.company_profile` | one row, VERCE defaults where known |
-| `settings.brand_asset_type` | the seven types in DOMAIN-MODEL §14 |
+| `settings.brand_asset_type` | the seven S2 types in DOMAIN-MODEL §14; S8B adds `PRODUCT_IMAGE` |
 | `settings.brand_asset` (+ version 1) | VERCE `PRIMARY_LOGO`, `COMPACT_LOGO`, `SYMBOL`, `FAVICON` (S2) |
 | `settings.branding_assignment` | the four roles, pointing at the seeded VERCE assets |
 | `pricing.sales_channel` | "Venda Direta" (`DIRECT`) with a 0% / R$ 0,00 fee rule version valid from today |
+| `commerce.marketplace_provider` | S8B inserts `MERCADO_LIVRE`, `SHOPEE`, `TIKTOK_SHOP`; never DIRECT |
+| `commerce.marketplace_provider_capability` | S8B inserts the eight closed capabilities for each provider as `UNKNOWN`, unverified; S8C.0 replaces assumptions with officially discovered states |
 | `inventory.supply_category` | Consumíveis, Componentes, Embalagens, Etiquetas, Acessórios |
 | `inventory.filament_material` | PLA, PETG, TPU, ABS, ASA |
 | `finance.expense_category` | the ten categories in DOMAIN-MODEL §11 |

@@ -336,7 +336,7 @@ erodes the margin the operator asked for.
 > `40,995 → 41,99`, `41,00 → 41,99`, `41,99 → 41,99`, `41,991 → 42,99`. For every valid raw price,
 > `suggestedPrice ≥ rawPrice` holds under this policy, same as every other rounding-up policy.
 
-### CR-07.5 — Bracket resolution (S8A target)
+### CR-07.5 — Bracket resolution (implemented in S8A)
 
 Bracket resolution has two distinct normative modes.
 
@@ -748,3 +748,127 @@ G4 check: `15,0438 / (1 - 0,35) = 23,1443…` → `23,14`.
 | CR-13.9 | `CR_13_8_negative_additional_amount_is_rejected` |
 | CR-13.10 | `CR_13_5_G17_batch_division_retains_six_decimal_places`; `CR_13_6_G18_multi_material_full_costing_is_reconciled` |
 | CR-13.11 / CR-13.12 | `Effective_quantity_above_stock_warns_but_still_calculates` |
+
+---
+
+## 15. Commerce Foundation facts and economics (S8B target)
+
+These rules add composition facts only. They reuse CR-07/CR-08 and never replace Pricing or
+Costing authority. All monetary calculation runs on the backend; React formats returned values.
+
+### CR-15.1 — Commercial activation
+
+```text
+isCommerciallyActive(productId)
+= Product.Active
+  AND exists ChannelOffer(ProductId = productId, Status = ACTIVE)
+```
+
+An inactive Product is never commercially active. An active Product with no ACTIVE offer is a
+valid technical Product but is not commercially active. There is no persisted Product flag.
+Channel deactivation does not alter this exact intent fact or the offer status; it separately
+blocks new activation, publication and commercial operations on that channel while retaining the
+offer and historical label.
+
+### CR-15.2 — Intended versus observed price divergence
+
+When both values exist:
+
+```text
+priceDeltaAmount  = round2(observedPrice - intendedUnitPrice)
+priceDeltaPercent = intendedUnitPrice > 0
+                    ? round6(priceDeltaAmount / intendedUnitPrice)
+                    : null
+```
+
+Positive means the observed external price is above VERCE intent; negative means below. Missing
+observed price yields both deltas `null`. The calculation is informational and never updates
+either source.
+
+### CR-15.3 — Channel economics preview
+
+Inputs are server-resolved Product cost, Pricing fee facts and ChannelOffer/candidate price. A
+client may supply `productId`, `salesChannelId`, `comparisonQuantity >= 1` and optional candidate
+price; it may not supply cost or fee authority.
+
+```text
+comparisonPrice = candidatePrice ?? ChannelOffer.IntendedUnitPrice
+```
+
+Pricing resolves the bracket by CR-07.5 `PRICE_CONTAINMENT` at `comparisonPrice`. Commission uses
+CR-07.6. For a single-product comparison basket:
+
+```text
+commissionPerUnit = clamped round2(comparisonPrice * commissionPercent)
+
+fixedFeePerUnit = FixedFeeApplication = PER_UNIT
+                  ? fixedFee
+                  : round6(fixedFee / comparisonQuantity)
+
+knownFeePerUnit = round2(commissionPerUnit + fixedFeePerUnit)
+
+knownNetRevenuePerUnit = round2(
+    comparisonPrice
+    - knownFeePerUnit
+    - (sellerPaidShippingEstimate ?? 0 only when explicitly known)
+)
+
+estimatedProfitPerUnit = round2(knownNetRevenuePerUnit - currentEstimatedUnitCost)
+
+contributionMargin = comparisonPrice > 0
+                     ? round6(estimatedProfitPerUnit / comparisonPrice)
+                     : null
+
+markup = currentEstimatedUnitCost > 0
+         ? round6((comparisonPrice / currentEstimatedUnitCost) - 1)
+         : null
+```
+
+The displayed comparison context always returns quantity and fee application. A multi-line basket
+must provide the complete line set and use CR-07.7; it must not apply the whole PER_ORDER fee to
+each line.
+
+`sellerPaidShippingEstimate ?? 0` is permitted in the arithmetic only when the policy explicitly
+states seller-paid shipping is absent/zero. If shipping is unknown, the result is a known-cost
+subtotal with `SHIPPING` in `missingComponents`; it is never silently zero. Packaging already
+included by ProductCostCalculator remains inside `currentEstimatedUnitCost` and is not added
+again.
+
+Every result carries:
+
+```text
+costBasis = ESTIMATED
+costCoverage = COMPLETE | PARTIAL
+missingComponents[]
+feeProvenance = LIVE_API | CACHE | MANUAL | FALLBACK
+feeObservedAt?
+feeExpiresAt?
+```
+
+Before S10, `ENERGY` is in `missingComponents`; this does not inject a zero-energy line. S8B
+therefore labels the profit/margin/markup as `PARTIAL_ESTIMATE` whenever any component is missing.
+It may show those deterministic known-cost figures, but must not label them complete, actual or
+realized. If fee resolution itself is unavailable, fee-dependent economics are `null` rather than
+computed with a zero fee.
+
+S8B local FeeRules report `MANUAL` provenance (or explicit configured `FALLBACK`) and no fake
+freshness timestamp. `LIVE_API` and `CACHE` are impossible before a later provider connector/cache
+exists.
+
+### CR-15.4 — Sales metric coverage
+
+`salesCoverage` is independent from CR-15.3 `costCoverage` and qualifies nullable Catalog
+`unitsSold`/`revenue` for the requested interval and source set:
+
+```text
+COMPLETE = authoritative canonical Sale coverage for the whole interval/source set
+PARTIAL  = known canonical Sales, but at least one relevant marketplace source/range uncovered
+UNKNOWN  = no authoritative coverage evidence for the relevant marketplace source/interval
+```
+
+DIRECT Sales are authoritative for transactions recorded in VERCE, not proof that every
+real-world direct transaction was entered. Before operational provider ingestion, MANUAL_ENTRY
+Sales on a marketplace channel contribute known units/revenue with PARTIAL coverage; their
+existence never produces COMPLETE. Without authoritative evidence, marketplace metrics are null
+with UNKNOWN coverage, not zero. Future marketplace COMPLETE additionally requires effective
+ORDERS_READ, successful sync and complete interval/source coverage.

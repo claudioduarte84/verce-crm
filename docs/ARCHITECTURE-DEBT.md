@@ -52,14 +52,14 @@ row unresolved has not met its Definition of Done, and the reviewer should rejec
 | ID | Area | Decision required | **Decision deadline** | **Implementation deadline** | Status |
 |---|---|---|---|---|---|
 | **H-001** | Quoting / Production | Revision ↔ production lifecycle: behaviour when a superseded revision has an order in each state; whether `has_pending_revision` blocks queue actions; what happens to actual consumption already recorded against a canceled order | **Before S6** | **S6 (Production Core) / S9 (operational)** | **Decision recorded (S6 entry, corrected)** — [ADR-0020 §A](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md); the minimum `ProductionOrder` persistence the `QuoteApproved` transactional invariant needs (§A.8) is now **S6** scope; the operational shop floor (items, material, printer/scheduling UX) remains **S9** |
-| **H-002** | Sales | Sale lifecycle and conversion cardinality | S8 | S8 | **Decision recorded (S8A.ARCH)** — [ADR-0021](architecture/ADR-0021-s8a-sale-conversion-and-expense-model.md); implementation remains S8A |
-| **H-003** | Sales / Pricing | Mixed-channel commercial order rule | S8 | S8 | **Decision recorded (S8A.ARCH)** — [ADR-0022](architecture/ADR-0022-pricing-override-discount-bracket-precedence.md); implementation remains S8A |
+| **H-002** | Sales | Sale lifecycle and conversion cardinality | S8 | S8 | **Closed (S8A)** — decision in [ADR-0021](architecture/ADR-0021-s8a-sale-conversion-and-expense-model.md), implemented and committed in `1eee9c5` |
+| **H-003** | Sales / Pricing | Mixed-channel commercial order rule | S8 | S8 | **Closed (S8A)** — decision in [ADR-0022](architecture/ADR-0022-pricing-override-discount-bracket-precedence.md), implemented and committed in `1eee9c5` |
 | **H-004** | Pricing | `PER_ORDER` fixed-fee allocation: rounding of `fixedFee / quantity` across lines, residual-cent assignment, behaviour when quantity changes on a revision | S5 (single-item case) / **S6** (cross-line case) | S5 (single-item case) / **S6** (cross-line case) | **Decision recorded (S6 entry)** — single-item case closed by S5; cross-line remainder by [ADR-0020 §C](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md) + [CR-07.7](CALCULATION-RULES.md#cr-077--per_order-fee-allocation-across-lines); implementation owed by S6 |
-| **H-005** | Pricing | Override, discount and bracket precedence | **S8** | **S8** | **Decision recorded (S8A.ARCH)** — [ADR-0022](architecture/ADR-0022-pricing-override-discount-bracket-precedence.md); implementation remains S8A |
+| **H-005** | Pricing | Override, discount and bracket precedence | **S8** | **S8** | **Closed (S8A)** — decision in [ADR-0022](architecture/ADR-0022-pricing-override-discount-bracket-precedence.md), implemented and committed in `1eee9c5` |
 | **H-006** | Costing / Production | Actual total cost composition: manual lines with no actual counterpart, partial reconciliation, failed units, exact exclusion of wastage from the actual side | **Before S10** | S11 | Open |
 | **H-007 A** | Inventory | Stock movement sign convention and `StockCount` concurrency (two counts of one material racing) | S3 | S3 | **Closed (S3)** — see [ADR-0017](architecture/ADR-0017-inventory-ledger-and-unit-normalization.md) §1, §3 |
 | **H-007 B** | Inventory / Production | Actual-consumption idempotency: preventing a production item's consumption being recorded twice | S9 | S9 | Open |
-| **H-008 A** | Finance | Expense / double-count model | S8 | S8 | **Decision recorded (S8A.ARCH)** — [ADR-0021](architecture/ADR-0021-s8a-sale-conversion-and-expense-model.md); implementation remains S8A |
+| **H-008 A** | Finance | Expense / double-count model | S8 | S8 | **Closed (S8A)** — decision in [ADR-0021](architecture/ADR-0021-s8a-sale-conversion-and-expense-model.md), implemented and committed in `1eee9c5` |
 | **H-008 B** | Reporting | Cash Result vs Product Margin consistency across every report surface | **Before S12** | S12 | Open |
 | **H-009 A** | Quoting | **Commercial** conversion semantics: quotes reopened after a terminal state, quotes whose current revision returns to `GENERATED` | **Before S6** | S6 | **Decision recorded (S6 entry)** — [ADR-0020 §B](architecture/ADR-0020-s6-quote-conversion-and-per-order-allocation.md) + [DATA-DICTIONARY §4.1](DATA-DICTIONARY.md#41-conversion-rate-taxa-de-conversão); implementation owed by S6 |
 | **H-009 B** | Reporting | Conversion reporting: cohort labelling of incomplete periods, `null` handling | S12 | S12 | Open |
@@ -97,6 +97,14 @@ contrary to the frozen S7/S14 scope authority decision and built the engine with
 S14 therefore starts from the persistence/binding-catalogue/block-renderer infrastructure already
 in place and is scoped to the **authoring UI only**, as ADR-0007 §6 originally assumed — the
 larger S14 scope this row previously flagged no longer applies.
+
+### Resolution note for S8 findings (S8A completion, 2026-09-23)
+
+S8A implemented and independently certified H-002, H-003, H-005 and H-008 A, including the
+canonical Sale lifecycle/conversion, one-channel commercial order rule, override/discount/bracket
+precedence and Expense double-count guards. Commit `1eee9c5` is the shipped baseline. S8B's
+[ADR-0023](architecture/ADR-0023-s8b-commerce-foundation.md) consumes those authorities and does
+not reopen them.
 
 ### Resolution note for H-004 and H-005 (S5)
 
@@ -253,6 +261,7 @@ the product asks for them.
 | Multi-currency | [ADR-0002 §7](architecture/ADR-0002-money-precision-and-rounding.md) | BRL implicit |
 | Stock as a blocking constraint | [DOMAIN-MODEL §3.4](DOMAIN-MODEL.md#34-stock) | v1 warns, never refuses |
 | KMS/HSM for the wrapping certificate | [SECURITY §5.1](SECURITY.md#51-storage) | Disproportionate for a single-container deployment |
+| Global UX/UI modernization pass | [ADR-0023 §13](architecture/ADR-0023-s8b-commerce-foundation.md#13-frontend-and-navigation) | S8B may build usable Commerce pages under current conventions; cohesive design system, collapsible sidebar, navigation groups, VERCE palette/type hierarchy, dashboard Home, breadcrumbs, state/empty/loading patterns, responsive tables and accessibility remain a cross-cutting S15 delivery |
 
 ---
 
@@ -262,5 +271,5 @@ the product asks for them.
 |---|---|---|
 | `VERCE_Proposta-Modelo_1.pdf` | **S7** | The default proposal's structure is fully specified; only the visual tokens (palette, typography, spacing, logo lockup) are pending — see [DEFAULT-PROPOSAL-TEMPLATE §0 and §8](DEFAULT-PROPOSAL-TEMPLATE.md) |
 | Smart-plug device selection | **S10** | `IEnergyProvider` exists; no vendor code may be written before the device is chosen |
-| Confirmation of marketplace fee structures (Shopee, Mercado Livre) | **S8** | Determines whether `PER_UNIT` remains the correct default and whether brackets are needed |
+| Official provider capability and fee discovery (Mercado Livre, Shopee, TikTok Shop) | **S8C.0** | Validate auth, listings, orders, fees, analytics, ads, shipping, inventory sync, limits, sandbox and regional support from official sources; S8B represents UNKNOWN/unsupported capability and creates no provider cache/endpoint assumption |
 | The external gate report as a file | informational | Deadlines in §1 are now **authoritative**, taken from the re-gate mission text; a report file would only add rationale |

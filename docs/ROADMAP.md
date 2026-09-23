@@ -434,7 +434,10 @@ changing the company phone and replacing the logo leaves an already-issued propo
 
 ---
 
-## S8A — Sales, Expenses & Pricing Decisions
+## S8A — Sales, Expenses & Pricing Decisions — COMPLETE
+
+> Completed, independently approved and committed on 2026-09-23 (`1eee9c5`). ADR-0021 and
+> ADR-0022 are implemented history; S8B does not rewrite them.
 
 - Explicit approved `QuoteRevision -> Sale` conversion (approval creates ProductionOrder, never
   Sale), standalone/manual sales, immutable copied snapshots, cancellation and `ESTIMATED` cost.
@@ -457,11 +460,43 @@ the monthly cost figure excludes inventory purchases.
 
 ---
 
-### S8B / S8C — future Commerce boundary
+### S8B.ARCH — Commerce Foundation architecture — CURRENT
 
-S8B introduces Commerce and persistent `ChannelOffer` (including DIRECT participation) plus
-listing publication. S8C adds operational marketplace-order ingestion into canonical Sales.
-Provider analytics remain S12 reconciliation data and are never added to Sales totals.
+- Freeze the fifteenth module, `Verce.Modules.Commerce`, and `commerce` schema in
+  [ADR-0023](architecture/ADR-0023-s8b-commerce-foundation.md).
+- Separate VERCE intent (`ChannelOffer`) from observed external state (`MarketplaceListing`).
+- Freeze Product-centric Commercial Catalog, listing-centric Published Items, marketplace account
+  and capability model, deterministic/manual reconciliation, channel-economics ports, safe Product
+  image linkage and data-driven commercial tags.
+- Preserve DIRECT as a normal ChannelOffer with no fake provider/account/listing.
+- Documentation only: no Commerce code, migration, frontend or tests.
+
+**Exit:** an independent architecture gate confirms that S8B can be implemented without provider
+assumptions, duplicated pricing/cost authority or premature S8C/S9+ concepts.
+
+### S8B — Commerce Foundation implementation — NEXT AFTER ARCHITECTURE GATE
+
+- Implement the provider-neutral Commerce module, schema, aggregates, APIs and usable local-first
+  pages for Commercial Catalog, Published Items, offers and Marketplace Accounts.
+- Implement only manual/import-fixture observed listing state; no provider HTTP call, publication,
+  polling, webhook or marketplace order.
+- Prove the ADR-0023 acceptance contracts across unit, PostgreSQL integration, authorization,
+  SQL pagination, Vitest and a local-only Playwright journey.
+
+**Exit:** DIRECT and manually observed marketplace foundations behave end to end while all
+external provider execution remains absent.
+
+### S8C.0 — Provider Discovery — AFTER S8B IMPLEMENTATION GATE
+
+For Mercado Livre, Shopee and TikTok Shop, validate official authentication, listing read/write,
+orders, fees, analytics, ads, shipping, inventory sync, limits, sandbox and regional restrictions.
+Record unsupported/unknown capabilities rather than inventing endpoints or reshaping Commerce.
+
+### S8C — Provider integrations and operational order ingestion — LATER
+
+Implement only capabilities validated by S8C.0. Commerce owns provider adapters/external order
+observation; Sales remains the canonical financial Sale. Provider analytics remain S12
+reconciliation data and are never summed with canonical Sales totals.
 
 ---
 
