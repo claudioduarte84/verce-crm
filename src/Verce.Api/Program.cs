@@ -11,6 +11,7 @@ using Verce.Api.Catalog;
 using Verce.Api.Cli;
 using Verce.Api.Customers;
 using Verce.Api.Costing;
+using Verce.Api.Commerce;
 using Verce.Api.Finance;
 using Verce.Api.Inventory;
 using Verce.Api.Outbox;
@@ -62,6 +63,8 @@ builder.Services.Configure<Verce.Modules.Settings.BrandAssetStorageOptions>(opti
     options.StorageRoot = effectiveBrandAssetRoot);
 builder.Services.AddScoped<Verce.Modules.Settings.AppSettingValueReader>();
 builder.Services.AddScoped<Verce.Modules.Settings.BrandAssetStorage>();
+builder.Services.AddScoped<MarketplaceListingObservationRetentionService>();
+builder.Services.AddScoped<Verce.Modules.Commerce.IChannelFeeProvider, LocalFeeRuleProvider>();
 
 // ---- S7: Quote PDF V1 (ADR-0016) — content-addressed generated-document storage, mirroring
 // BrandAssets:StorageRoot's exact production-hardening shape one directory over. ----
@@ -113,6 +116,7 @@ builder.Services.AddScoped<Verce.Modules.Costing.ICostingInventoryReader, Verce.
 builder.Services.AddHostedService<Verce.Modules.Settings.SettingsSeedService>();
 builder.Services.AddHostedService<Verce.Modules.Inventory.InventorySeedService>();
 builder.Services.AddHostedService<Verce.Modules.Pricing.PricingSeedService>();
+builder.Services.AddHostedService<Verce.Modules.Commerce.CommerceSeedService>();
 builder.Services.AddHostedService<Verce.Modules.Finance.FinanceSeedService>();
 // ADR-0007 §7 (S7/S14 scope authority gate, OPTION A): seeds document_type + the default VERCE
 // proposal template as ordinary rows — never compiled renderer code.
@@ -256,6 +260,7 @@ app.MapQuotingEndpoints();
 app.MapQuotePdfEndpoints();
 app.MapExpenseEndpoints();
 app.MapSalesEndpoints();
+app.MapCommerceEndpoints();
 
 // ---- Health endpoints (ADR-0012 §25, OPERATIONS §9): status word only, anonymous ----
 app.MapGet("/health/live", () => Results.Text("healthy")).AllowAnonymous();

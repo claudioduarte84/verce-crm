@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><RootNamespace>Verce.Modules.Commerce</RootNamespace></PropertyGroup>
+  <ItemGroup><ProjectReference Include="..\..\Verce.SharedKernel\Verce.SharedKernel.csproj" /><ProjectReference Include="..\..\Verce.Platform\Verce.Platform.csproj" /></ItemGroup>
+  <ItemGroup><PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.11" /></ItemGroup>
+</Project>

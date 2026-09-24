@@ -27,9 +27,9 @@ module.exports = () => {
   const childEnv = { ...process.env, ConnectionStrings__Verce: connectionString }
   let output
   try {
-    output = execFileSync('dotnet', ['run', '--no-build', '--project', '../../src/Verce.Api', '--', 'bootstrap-owner', '--email', ownerEmail, '--name', ownerName], { cwd: __dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: childEnv })
+    output = execFileSync('dotnet', ['run', '--no-build', '--configuration', 'Release', '--project', '../../src/Verce.Api', '--', 'bootstrap-owner', '--email', ownerEmail, '--name', ownerName], { cwd: __dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: childEnv })
   } catch {
-    output = execFileSync('dotnet', ['run', '--no-build', '--project', '../../src/Verce.Api', '--', 'recover-owner', '--email', ownerEmail], { cwd: __dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: childEnv })
+    output = execFileSync('dotnet', ['run', '--no-build', '--configuration', 'Release', '--project', '../../src/Verce.Api', '--', 'recover-owner', '--email', ownerEmail], { cwd: __dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: childEnv })
   }
   const token = /token=([^\s]+)/.exec(output)?.[1]
   if (!token) throw new Error('E2E bootstrap did not yield a setup token')

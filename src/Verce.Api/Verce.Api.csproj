@@ -38,6 +38,7 @@
     <ProjectReference Include="..\Modules\Verce.Modules.Inventory\Verce.Modules.Inventory.csproj" />
     <ProjectReference Include="..\Modules\Verce.Modules.Costing\Verce.Modules.Costing.csproj" />
     <ProjectReference Include="..\Modules\Verce.Modules.Pricing\Verce.Modules.Pricing.csproj" />
+    <ProjectReference Include="..\Modules\Verce.Modules.Commerce\Verce.Modules.Commerce.csproj" />
     <ProjectReference Include="..\Modules\Verce.Modules.Quoting\Verce.Modules.Quoting.csproj" />
     <ProjectReference Include="..\Modules\Verce.Modules.Sales\Verce.Modules.Sales.csproj" />
     <ProjectReference Include="..\Modules\Verce.Modules.Production\Verce.Modules.Production.csproj" />

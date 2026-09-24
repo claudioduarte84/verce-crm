@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
 import { resolve } from 'node:path'
-import { acquireE2eRunLock, provisionE2eDatabase, releaseE2eRunLock, resolveE2ePostgresTarget } from './e2e-env.cjs'
+import { acquireE2eRunLock, dropE2eDatabaseIfExists, provisionE2eDatabase, releaseE2eRunLock, resolveE2ePostgresTarget, resolveE2eRunId } from './e2e-env.cjs'
 
 /** S1 smoke plus real S2 authenticated browser certification. The setup project provisions and
  * signs in a disposable owner through the live API; dependent projects load that saved browser
@@ -11,6 +11,7 @@ import { acquireE2eRunLock, provisionE2eDatabase, releaseE2eRunLock, resolveE2eP
 // operator.setup.ts all resolve their own copy from the SAME e2e-env.cjs, but every one of them
 // is required (by construction — see e2e-env.cjs) to name the same disposable container and
 // database, never the shared "verce" dev database or its container.
+const e2eRunId = resolveE2eRunId()
 const e2eTarget = resolveE2ePostgresTarget()
 const e2eConnectionString = e2eTarget.connectionString
 // The run lock must be held before ANY mutable step: Playwright does not guarantee globalSetup
@@ -29,6 +30,7 @@ function releaseHarnessLock() {
 try {
   provisionE2eDatabase(e2eTarget)
 } catch (error) {
+  try { dropE2eDatabaseIfExists(e2eTarget.database, e2eTarget) } catch { /* preserve the original provisioning failure */ }
   releaseHarnessLock()
   throw error
 }
@@ -61,24 +63,24 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'dotnet run --no-build --project src/Verce.Api --urls https://localhost:7246',
+      command: 'dotnet run --no-build --configuration Release --project src/Verce.Api --urls https://localhost:7246',
       cwd: '../..',
       url: 'https://localhost:7246/health/ready',
       ignoreHTTPSErrors: true,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 120_000,
       // SECURITY §3.2's 10-req/min-per-IP limit on /api/auth/* is real production behavior and
       // stays that way by default (Program.cs) — every Playwright test shares one "client IP"
       // (localhost) and each page load re-checks the session, so a full E2E run legitimately
       // needs far more than 10 such calls/minute. Raised ONLY for this test-managed host, never
       // in the production composition root.
-      env: { RateLimiting__Auth__PermitLimit: '100000', ConnectionStrings__Verce: e2eConnectionString },
+      env: { RateLimiting__Auth__PermitLimit: '100000', ConnectionStrings__Verce: e2eConnectionString, VERCE_E2E_RUN_ID: e2eRunId },
     },
     // Production preview, not `vite dev`: a long sequential E2E run hits a real Vite dev-server
     // state issue (its per-module transform/HMR pipeline can wedge after enough real round-trips
     // through the proxy — the ASP.NET Core host itself stays healthy throughout, confirmed by
     // direct requests during the hang). `preview` serves the already-built static bundle, which
     // sidesteps that whole code path and is also more representative of what is actually deployed.
-    { command: 'npm run build && npm run preview -- --port 4173 --strictPort', cwd: '../../frontend', url: 'https://localhost:4173', ignoreHTTPSErrors: true, reuseExistingServer: !process.env.CI, timeout: 120_000 },
+    { command: 'npm run build && npm run preview -- --port 4173 --strictPort', cwd: '../../frontend', url: 'https://localhost:4173', ignoreHTTPSErrors: true, reuseExistingServer: false, timeout: 120_000 },
   ],
 })

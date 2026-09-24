@@ -28,6 +28,7 @@ public static class SettingCatalog
         Decimal("costing.default_labor_hourly_rate", "0.00", "costing", "Mão de obra padrão", value => value >= 0),
         Decimal("costing.default_wastage_rate", "0.00", "costing", "Perda padrão em pontos percentuais (0 a 100; ADR-0018)", value => value is >= 0 and <= 100),
         Decimal("energy.overhead_factor", "0.00", "energy", "Fator de overhead", value => value >= 0),
+        Int("commerce.listing_observation_retention_days", "180", "commerce", "Retenção de observações de listagem", value => value >= 1),
         Choice("inventory.filament_price_policy", "LAST_PURCHASE", "inventory", "Política de preço de filamento", "LAST_PURCHASE", "MANUAL"),
         Choice("ui.default_theme", "verce-default", "ui", "Tema padrão", "verce-default"),
         RequiredString("branding.product_name", "VERCE 3D", "branding", "Nome do produto", 200),

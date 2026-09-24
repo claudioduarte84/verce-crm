@@ -21,7 +21,7 @@ public sealed class SettingsSeedService(
         var storage = scope.ServiceProvider.GetRequiredService<BrandAssetStorage>();
         if (!(await db.Database.GetPendingMigrationsAsync(cancellationToken)).Any())
         {
-            foreach (var (code, name) in new[] { ("PRIMARY_LOGO", "Logo principal"), ("COMPACT_LOGO", "Logo compacto"), ("NEGATIVE_LOGO", "Logo negativo"), ("SYMBOL", "Símbolo"), ("FAVICON", "Favicon"), ("DOCUMENT_LOGO", "Logo de documento"), ("OTHER", "Outro") })
+            foreach (var (code, name) in new[] { ("PRIMARY_LOGO", "Logo principal"), ("COMPACT_LOGO", "Logo compacto"), ("NEGATIVE_LOGO", "Logo negativo"), ("SYMBOL", "Símbolo"), ("FAVICON", "Favicon"), ("DOCUMENT_LOGO", "Logo de documento"), ("PRODUCT_IMAGE", "Imagem de produto"), ("OTHER", "Outro") })
                 if (!await db.Set<BrandAssetType>().AnyAsync(x => x.Code == code, cancellationToken)) db.Add(new BrandAssetType(code, name));
             if (!await db.Set<CompanyProfile>().AnyAsync(cancellationToken)) db.Add(new CompanyProfile(new("VERCE 3D", "VERCE 3D", null, null, null, null, null, null, null, null, null, null, null, null, null, "BR", "America/Sao_Paulo", "BRL")));
             foreach (var seed in SettingSeeds.All)

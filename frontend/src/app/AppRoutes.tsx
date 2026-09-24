@@ -16,6 +16,9 @@ import { QuoteDetailPage } from '../pages/QuoteDetailPage'
 import { SalesPage } from '../pages/SalesPage'
 import { SaleDetailPage } from '../pages/SaleDetailPage'
 import { ExpensesPage } from '../pages/ExpensesPage'
+import { CommercialCatalogPage } from '../pages/CommercialCatalogPage'
+import { PublishedItemsPage } from '../pages/PublishedItemsPage'
+import { MarketplaceAccountsPage } from '../pages/MarketplaceAccountsPage'
 
 /** Routing foundation (mission §14). Only the routes S1 needs: login, setup-account, an
  * authenticated home placeholder, and not-found. Customers/Catalog/Quoting/... are S2+. */
@@ -43,6 +46,9 @@ export function AppRoutes() {
       <Route path="/sales" element={<RequireAuth><SalesPage /></RequireAuth>} />
       <Route path="/sales/:saleId" element={<RequireAuth><SaleDetailPage /></RequireAuth>} />
       <Route path="/expenses" element={<RequireAuth><ExpensesPage /></RequireAuth>} />
+      <Route path="/catalog" element={<RequireAuth><CommercialCatalogPage /></RequireAuth>} />
+      <Route path="/published-items" element={<RequireAuth><PublishedItemsPage /></RequireAuth>} />
+      <Route path="/marketplace-accounts" element={<RequireAuth><MarketplaceAccountsPage /></RequireAuth>} />
       <Route path="/settings" element={<RequireAuth><SettingsPage /></RequireAuth>} />
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

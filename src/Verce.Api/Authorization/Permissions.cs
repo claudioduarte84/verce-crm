@@ -28,6 +28,9 @@ public static class Permissions
     public const string SalesManage = "sales:manage";
     public const string ExpensesRead = "expenses:read";
     public const string ExpensesManage = "expenses:manage";
+    public const string CommerceRead = "commerce:read";
+    public const string CommerceManage = "commerce:manage";
+    public const string CommerceAccountsManage = "commerce:accounts:manage";
     public static void AddPolicies(Microsoft.AspNetCore.Authorization.AuthorizationOptions options)
     {
         options.AddPolicy(CustomersRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
@@ -52,5 +55,8 @@ public static class Permissions
         options.AddPolicy(SalesManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
         options.AddPolicy(ExpensesRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
         options.AddPolicy(ExpensesManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
+        options.AddPolicy(CommerceRead, p => p.RequireRole(Roles.Owner, Roles.Operator, Roles.Viewer));
+        options.AddPolicy(CommerceManage, p => p.RequireRole(Roles.Owner, Roles.Operator));
+        options.AddPolicy(CommerceAccountsManage, p => p.RequireRole(Roles.Owner));
     }
 }

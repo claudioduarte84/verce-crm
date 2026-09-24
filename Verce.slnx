@@ -7,6 +7,7 @@
   <Folder Name="/src/Modules/">
     <Project Path="src/Modules/Verce.Modules.AI/Verce.Modules.AI.csproj" />
     <Project Path="src/Modules/Verce.Modules.Catalog/Verce.Modules.Catalog.csproj" />
+    <Project Path="src/Modules/Verce.Modules.Commerce/Verce.Modules.Commerce.csproj" />
     <Project Path="src/Modules/Verce.Modules.Costing/Verce.Modules.Costing.csproj" />
     <Project Path="src/Modules/Verce.Modules.Customers/Verce.Modules.Customers.csproj" />
     <Project Path="src/Modules/Verce.Modules.Documents/Verce.Modules.Documents.csproj" />
@@ -27,6 +28,7 @@
     <Project Path="tests/Verce.Catalog.Tests/Verce.Catalog.Tests.csproj" />
     <Project Path="tests/Verce.Costing.Tests/Verce.Costing.Tests.csproj" />
     <Project Path="tests/Verce.Pricing.Tests/Verce.Pricing.Tests.csproj" />
+    <Project Path="tests/Verce.Commerce.Tests/Verce.Commerce.Tests.csproj" />
     <Project Path="tests/Verce.Sales.Tests/Verce.Sales.Tests.csproj" />
     <Project Path="tests/Verce.Finance.Tests/Verce.Finance.Tests.csproj" />
     <Project Path="tests/Verce.Quoting.Tests/Verce.Quoting.Tests.csproj" />

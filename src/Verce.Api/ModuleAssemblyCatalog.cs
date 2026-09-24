@@ -15,6 +15,7 @@ public static class ModuleAssemblyCatalog
         typeof(Verce.Modules.Inventory.InventoryModuleMarker).Assembly,
         typeof(Verce.Modules.Costing.CostingModuleMarker).Assembly,
         typeof(Verce.Modules.Pricing.PricingModuleMarker).Assembly,
+        typeof(Verce.Modules.Commerce.CommerceModuleMarker).Assembly,
         typeof(Verce.Modules.Quoting.QuotingModuleMarker).Assembly,
         typeof(Verce.Modules.Sales.SalesModuleMarker).Assembly,
         typeof(Verce.Modules.Production.ProductionModuleMarker).Assembly,

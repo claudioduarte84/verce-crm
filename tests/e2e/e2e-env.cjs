@@ -167,8 +167,16 @@ function extractConnectionEndpoint(connectionString) {
   return endpoint
 }
 
+function resolveE2eRunId() {
+  const configured = String(process.env.VERCE_E2E_RUN_ID || '').trim().toLowerCase()
+  if (configured && /^[a-z0-9_]{1,40}$/.test(configured)) return configured
+  const generated = randomUUID().replaceAll('-', '')
+  process.env.VERCE_E2E_RUN_ID = generated
+  return generated
+}
+
 function resolveE2eDatabaseName() {
-  return process.env.VERCE_E2E_DATABASE || DEFAULT_E2E_DATABASE_NAME
+  return process.env.VERCE_E2E_DATABASE || `${DEFAULT_E2E_DATABASE_NAME}_${resolveE2eRunId()}`
 }
 
 /** Delegates its duplicate-alias detection entirely to {@link extractConnectionEndpoint} (R-01)
@@ -359,14 +367,16 @@ function ensureDatabaseExists(databaseName, target = resolveE2ePostgresTarget())
 function dropE2eDatabaseIfExists(databaseName, target = resolveE2ePostgresTarget()) {
   assertE2eRunLockHeld()
   const safeDatabaseName = assertDisposableDatabaseName(databaseName)
-  controlPsql(['-c', `DROP DATABASE IF EXISTS ${quotePostgresIdentifier(safeDatabaseName)}`], target)
+  // Playwright-owned API/browser processes can still be closing pooled connections when global
+  // teardown runs. FORCE terminates only sessions on this validated disposable database.
+  controlPsql(['-c', `DROP DATABASE IF EXISTS ${quotePostgresIdentifier(safeDatabaseName)} WITH (FORCE)`], target)
 }
 
 /** Applies EF Core migrations after the same disposable-database guard used for provisioning.
  * H-03: also requires the E2E run lock. */
 function applyMigrations(target = resolveE2ePostgresTarget()) {
   assertE2eRunLockHeld()
-  execFileSync('dotnet', ['run', '--no-build', '--project', API_PROJECT_DIR, '--', 'migrate'], {
+  execFileSync('dotnet', ['run', '--no-build', '--configuration', 'Release', '--project', API_PROJECT_DIR, '--', 'migrate'], {
     cwd: API_PROJECT_DIR,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -663,6 +673,7 @@ module.exports = {
   DEFAULT_E2E_PASSWORD,
   DEFAULT_OWNER_EMAIL,
   DEFAULT_OWNER_NAME,
+  resolveE2eRunId,
   DATABASE_NAME_PATTERN,
   ROLE_NAME_PATTERN,
   PROTECTED_POSTGRES_CONTAINERS,
