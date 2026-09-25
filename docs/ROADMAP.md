@@ -460,7 +460,7 @@ the monthly cost figure excludes inventory purchases.
 
 ---
 
-### S8B.ARCH — Commerce Foundation architecture — CURRENT
+### S8B.ARCH — Commerce Foundation architecture — COMPLETE
 
 - Freeze the fifteenth module, `Verce.Modules.Commerce`, and `commerce` schema in
   [ADR-0023](architecture/ADR-0023-s8b-commerce-foundation.md).
@@ -474,7 +474,7 @@ the monthly cost figure excludes inventory purchases.
 **Exit:** an independent architecture gate confirms that S8B can be implemented without provider
 assumptions, duplicated pricing/cost authority or premature S8C/S9+ concepts.
 
-### S8B — Commerce Foundation implementation — NEXT AFTER ARCHITECTURE GATE
+### S8B — Commerce Foundation implementation — COMPLETE
 
 - Implement the provider-neutral Commerce module, schema, aggregates, APIs and usable local-first
   pages for Commercial Catalog, Published Items, offers and Marketplace Accounts.
@@ -486,17 +486,26 @@ assumptions, duplicated pricing/cost authority or premature S8C/S9+ concepts.
 **Exit:** DIRECT and manually observed marketplace foundations behave end to end while all
 external provider execution remains absent.
 
-### S8C.0 — Provider Discovery — AFTER S8B IMPLEMENTATION GATE
+### S8C.0 — Official Provider Discovery — APPROVED; DOCUMENTATION PACKAGE COMPLETE
 
 For Mercado Livre, Shopee and TikTok Shop, validate official authentication, listing read/write,
 orders, fees, analytics, ads, shipping, inventory sync, limits, sandbox and regional restrictions.
 Record unsupported/unknown capabilities rather than inventing endpoints or reshaping Commerce.
+The 2026-09-24 [official discovery package](S8C0-OFFICIAL-PROVIDER-DISCOVERY.md) includes a
+[Brazil capability matrix](S8C0-CAPABILITY-MATRIX.md), [auth/security](S8C0-PROVIDER-AUTH-AND-SECURITY.md),
+[sync/limits](S8C0-SYNC-AND-RATE-LIMITS.md) and [architecture proposal](S8C0-INTEGRATION-ARCHITECTURE-PROPOSAL.md).
+Current Shopee Brazil reference access is restricted, and several TikTok Shop Brazil-local API
+entitlements remain unverified; the S8B database capability seeds remain `UNKNOWN`.
 
-### S8C — Provider integrations and operational order ingestion — LATER
+### S8C — Provider integrations and operational order ingestion — AFTER S8C.0 GATE
 
 Implement only capabilities validated by S8C.0. Commerce owns provider adapters/external order
 observation; Sales remains the canonical financial Sale. Provider analytics remain S12
 reconciliation data and are never summed with canonical Sales totals.
+The proposed sequence is S8C.1 authorization/connector foundation; S8C.2 listing reads;
+S8C.3 order read and Sales ingestion; S8C.4 fee quotes and shipping facts; S8C.5 publication
+and inventory; S8C.6 analytics/ads where Brazil support and seller grants are verified.
+Each wave has its own implementation and coverage gate; none is marked complete by S8C.0.
 
 ---
 
