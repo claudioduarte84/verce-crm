@@ -83,8 +83,8 @@ public sealed class CommerceDomainTests
 
         provider.State.Should().Be(ProviderCapabilityState.SUPPORTED);
         account.Capabilities.Single().State.Should().Be(AccountCapabilityState.GRANTED);
-        account.ConnectionState.Should().Be(MarketplaceConnectionState.ERROR);
-        account.SyncState.Should().Be(MarketplaceSyncState.ERROR);
+        account.Connection.RuntimeAvailability.Should().Be(MarketplaceRuntimeAvailability.UNAVAILABLE);
+        account.SyncState.Should().Be(MarketplaceSyncState.NEVER_SYNCED);
     }
 
     [Theory]

@@ -75,9 +75,9 @@ public sealed class CommerceAuthorizationIntegrationTests : IAsyncLifetime
             new CommercialTagWriteRequest("AUTH-" + Guid.NewGuid().ToString("N"), "Autorização", true, null));
         AssertForbidden(tag, commerceMutationForbidden, role, "tag");
 
-        var account = await client.PostAsync("/api/commerce/marketplace-accounts",
-            new MarketplaceAccountWriteRequest("SHOPEE", "auth-" + Guid.NewGuid(), Guid.NewGuid(), "Conta auth", null, null));
-        AssertForbidden(account, accountMutationForbidden, role, "marketplace account");
+        var authorization = await client.PostAsync("/api/commerce/marketplace-authorizations",
+            new BeginMarketplaceAuthorizationRequest("SHOPEE", Guid.NewGuid(), "Conta auth"));
+        AssertForbidden(authorization, accountMutationForbidden, role, "marketplace authorization");
     }
 
     private static void AssertForbidden(HttpResponseMessage response, bool expected, string role, string surface)

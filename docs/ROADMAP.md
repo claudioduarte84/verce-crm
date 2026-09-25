@@ -497,6 +497,179 @@ The 2026-09-24 [official discovery package](S8C0-OFFICIAL-PROVIDER-DISCOVERY.md)
 Current Shopee Brazil reference access is restricted, and several TikTok Shop Brazil-local API
 entitlements remain unverified; the S8B database capability seeds remain `UNKNOWN`.
 
+### S8C.1 — Marketplace Connector & Authorization Foundation — S8C.1 COMPLETE
+
+Freeze the provider-neutral connector registry, granular authorization boundary, protected
+credential reference/store, hashed one-time authorization sessions, account identity lifecycle,
+authorization/runtime-state separation, normalized errors/resilience and safe API/UI contracts in
+[ADR-0024](architecture/ADR-0024-s8c1-marketplace-connector-authorization-foundation.md). The
+implementation handoff is [S8C1-IMPLEMENTATION-HANDOFF.md](S8C1-IMPLEMENTATION-HANDOFF.md).
+
+**Implementation status (2026-09-25, five sessions — the third closed the RT-01 extension, the
+G-08 deferral decision, and the Playwright OPEN DECISION write-up; the fourth built the separate
+E2E host the OPEN DECISION proposed an alternative to, per explicit human direction, and closed
+the browser-level Playwright marketplace journeys; the fifth closed three independent-review
+findings — real migration certification, a non-hermetic test, and a Playwright harness defect —
+see `docs/S8C1-IMPLEMENTATION-HANDOFF.md`'s fifth evidence section):** the core session/operation/credential model,
+callback claim-and-confirm flow, local protected credential store, refresh/probe workflows,
+disconnect, Quartz housekeeping (expiry/abandonment resolution/candidate cleanup/credential
+decryptability validation), a startup recovery pass, the safe status/connection/probe/cancel API
+surface, the 410 retirement of manual account creation, and a test-only fake connector are
+implemented. A second session closed most of the remaining Stream D gap: RT-02 (duplicate/
+ambiguous authorization — 8 tests: connected/inactive-X duplicate, two concurrent CONNECT_NEW
+sessions, RECONNECT X→X, RECONNECT X→Y mismatch, PRESERVES_EXISTING vs UNKNOWN/MAY_SUPERSEDE
+impact, ambiguous-after-send fail-all, proven-not-sent preserves other accounts) and RT-03
+(K1→K2 store-loss recovery — 6 tests: missing/corrupt K1, unconfirmed-higher-K1 never CAS'd from,
+old K1 never regains authority after K2, missing credential root recovers, multi-account key-ring
+loss recovers independently with the host staying available) are now certified with real
+PostgreSQL barriers, plus the credential store (18 focused tests: path/ACL/reparse validation,
+atomic CAS, concurrent readers-during-replace, corruption, missing key/file, restart, exclusive
+root ownership, candidate isolation, version-authority), callback security (9 tests: forged/
+expired/replayed state, wrong provider route/browser binding, SalesChannel deactivated mid-flow,
+actor permission revoked mid-flow, no open-redirect, no code/state/error_description in captured
+logs), audit security (2 tests inspecting real persisted `AuditLog` rows), housekeeping fairness
+(1 test), and production isolation (4 tests, including a new fail-closed guard — see below).
+A third session then extended RT-01 from 2 to **10 of ~14** listed scenarios, all against real
+PostgreSQL row-lock barriers (two using a raw `NpgsqlConnection`-held `FOR UPDATE` transaction to
+prove the resolver genuinely BLOCKS at the database level, not merely logically defers): normal
+RECONNECT commit; an in-flight commit that succeeds is never overridden by a racing resolver; an
+in-flight commit that rolls back lets the resolver fail closed; an abandoned CLAIMED session/
+operation is resolved by the bounded housekeeping sweep; a REFRESH receipt under exact guards is
+confirmed by a new refresh-only resolver path (built this session — see defects below); a REFRESH
+receipt with incompatible guards fails closed; an actor losing permission mid-reconnect (after the
+exchange, before final commit) fails the account closed; cleanup never deletes the credential of a
+confirmed non-DISCONNECT operation; plus the two from the first session (normal CONNECT_NEW;
+resolver wins the row-lock race). The remaining ~4 rows are narratively distinct restatements of
+scenarios already covered by the above (see the S8C1-IMPLEMENTATION-HANDOFF.md evidence note).
+Full `Verce.IntegrationTests` suite: **464/464 passing** (461 + the fourth session's new static
+production-isolation assertion + the fifth session's two hermetic S8B→S8C.1 migration
+certification tests). Full non-integration backend (unit/
+domain/architecture): all green. Frontend: `MarketplaceAccountsPage` extended with real
+connection-status detail (RequiredAction, last success/failure, in-progress flags), an explicit
+Probe action, and distinct RECONNECT_EXISTING_ACCOUNT / REAUTHORIZE_AFTER_STORE_LOSS prompts that
+both reuse the existing reauthorize route; 129/129 Vitest, typecheck/lint/build/OpenAPI-check all
+green. The full existing Playwright suite (real browser, real dotnet host, real disposable
+PostgreSQL): **41/41 passing**, confirmed with a real terminal exit code (0) twice in a row after
+the fifth session's harness fix (see below) — a launcher-vs-real-process distinction that
+previously left webServer teardown unable to reliably track the actual server process — including
+an updated `s8b-commerce.spec.ts` (its old manual-account-creation assertions were demonstrably
+obsolete under the frozen ADR-0024 410 retirement — updated, not weakened; see the spec's own
+inline comment for the exact reasoning). Release build: 0 errors, 0 warnings.
+
+**Fifth session (2026-09-25) — independent-review findings closed, no architecture reopened:** an
+independent review ("Codex Sol") returned NEEDS_FIXES with three blocking, non-architectural
+findings, all now closed with real evidence (full detail in
+`docs/S8C1-IMPLEMENTATION-HANDOFF.md`'s fifth evidence section): (1) real migration certification
+for the S8C.1 migration was missing — added two hermetic tests, each with their own disposable
+PostgreSQL container, that migrate a fresh database zero-to-head, bring a separate database to the
+real S8B predecessor schema via EF's own migrator and seed it with representative valid S8B data
+(including a legacy account with obviously-fictitious CONNECTED/credential/error values), apply
+only S8C.1 and verify both full data preservation and the exact required fail-closed state, migrate
+back down and verify the Down migration's actual documented behavior, then reapply and confirm it
+succeeds again — no second migration was needed, no genuine schema defect was found; (2) one
+integration test was silently relying on another test's leftover seed data for a real, correctly-
+enforced foreign key — fixed by making the test persist its own prerequisite, proven hermetic alone,
+in its class, and across the full 464-test suite; (3) the Playwright harness's `dotnet run`-based
+webServer command was a launcher process teardown could lose track of — switched to direct compiled-
+DLL invocation (mirroring `s2-restart-persistence.spec.ts`'s own established pattern), which
+surfaced and required fixing two real differences between `dotnet run` and direct invocation
+(`ASPNETCORE_ENVIRONMENT` no longer implicit via `launchSettings.json`; a relative `--contentRoot`
+resolving against the wrong base directory, confirmed by direct reproduction to silently disable
+real seeding) — the full main Playwright suite now completes with a confirmed real exit code.
+
+**G-08's HTTP client/retry layer is a deliberate, recorded, human-directed deferral, not a gap:**
+see `docs/ARCHITECTURE-DEBT.md`'s "Before any real (non-fake) marketplace connector adapter" entry.
+There is no real provider HTTP call anywhere in S8C.1 to protect (the only registered connector is
+the in-memory fake, which never opens a socket), so the layer is deferred until the first real
+adapter is built and can genuinely exercise it — never retrofitted untested ahead of time.
+
+**The browser-level Playwright marketplace-authorization journeys (focused/store-loss/duplicate-
+auth) are now built and passing**, per explicit fourth-session human direction that declined the
+third session's OPEN DECISION proposal (loading the fake into the real `Verce.Api` process via an
+opt-in switch) and instead directed a separate, test-owned host — see
+`docs/S8C1-IMPLEMENTATION-HANDOFF.md`'s "RESOLVED" section (which supersedes and preserves the
+original OPEN DECISION for the record) for the full design and evidence. In short:
+`tests/Verce.Marketplaces.E2EHost` reuses `Verce.Api`'s real, unmodified `Program` on a genuine
+Kestrel server via the same `WebApplicationFactory` reuse mechanism the 27 in-process tests
+already use; `Verce.Api.csproj` gained zero new code, switches, endpoints or environment gates.
+`tests/e2e/playwright.marketplace.config.ts` (`npm run test:marketplace`) points a real Chromium
+browser at it instead of `src/Verce.Api`; `tests/e2e/specs/s8c1-marketplace.spec.ts` implements
+all three mandated journeys against real HTTP/real UI, each passing, reconfirmed three times for
+stability with no flakes. `MarketplaceProductionIsolationTests` gained a new static assertion that
+`Verce.Api`'s compiled assembly never references the fake connector's project or any transitively
+loaded assembly defining it — passing. These journeys found and fixed two real defects invisible
+to the 27 in-process tests (which never drive a real browser through a real redirect or read
+rendered UI): the callback route redirected to a path with no matching frontend route, stranding
+every real completed authorization on a 404 instead of the Marketplace Accounts screen; and
+`ProbeAsync` never escalated a confirmed local credential loss to `REAUTHORIZATION_REQUIRED`, so
+the existing `REAUTHORIZE_AFTER_STORE_LOSS` UI/copy was dead code no probe could ever reach (fixed,
+along with a related frontend staleness gap in the Probe handler). Both fixes and their full
+evidence are detailed in the handoff doc's RESOLVED section. The existing 41/41 unmodified-host
+Playwright suite (unchanged except excluding the new spec from its own default project) plus 27
+in-process `WebApplicationFactory`-based PostgreSQL integration tests (RT-01/02/03) remain
+additional, still-passing certification evidence alongside the new browser-level journeys.
+
+This session found and fixed several more genuine defects beyond the first session's three: RT-02
+did not honor `PRESERVES_EXISTING` credential impact, did not fail the Y account closed on an
+X→Y reconnect mismatch, did not re-authorize the winner on a concurrent-session DB race, and
+conflated "proven not sent" with "ambiguous" failures (a plain provider denial would have
+force-reauthorized every connected account for that provider — fixed via a new
+`MarketplaceRequestNotSentException` send-certainty signal). RT-03's entire K1→K2 mechanism did
+not exist: `CreateStagedAsync` silently reset to version 1 under the SAME reference name on any
+missing/corrupt file instead of forcing a fresh, distinguishable K2 reference — a real violation
+of "never reset K1 to version 1" and "old K1 backup reappearing must never regain authority" (a
+restored K1 backup would have collided with K2 at the same path). The credential-store root
+validator accepted relative paths (checked `IsPathFullyQualified` only after `GetFullPath` had
+already resolved them against the CWD) and had a path-prefix false-positive (`"C:\Foo"` vs
+`"C:\FooBar"`). A genuine Windows-specific concurrency bug — `UnauthorizedAccessException` on a
+concurrent atomic file replace racing a reader, uncaught because it is not an `IOException` —
+would have crashed store writes under real contention; fixed with `FileShare.Delete` on reads plus
+a narrow bounded retry. The callback flow never rechecked SalesChannel activity or actor
+permission/role between claim and final commit (only actor *existence*), and a resolver-wins or
+actor-permission-loss race during confirmation left the affected account's authorization state
+unresolved instead of calling the existing `ResolvePendingAsync` arbiter. Production composition
+had no actual runtime guard against a misconfigured test-only connector registration — added one
+that fails startup closed. The third session's own additional defects: `ResolvePendingAsync` had
+no refresh-only receipt-confirmation path at all (always failed REFRESH recovery closed even under
+exact guards — safe, but not ADR-complete; now implemented and RT-01-tested); two of the new RT-01
+tests themselves initially failed against a real, if narrow, TEST-side gap — `PostgresFixture.CreateContext()`'s
+raw `DbContextOptionsBuilder` does not attach `AggregateVersionInterceptor`/`AuditSaveChangesInterceptor`
+(only the DI-resolved, `IUnitOfWork`-driving context does), so a raw-context domain mutation used to
+manufacture a "foreign operation moved the root" guard mismatch silently failed to bump `Version` at
+all; fixed by driving that specific mutation through the real `PUT` endpoint instead. The fourth
+session's own two defects, both found only by the new real-browser journeys: the callback route's
+redirect target (`/commerce/marketplace-accounts`) matched no registered frontend route, stranding
+every real completed authorization on `NotFoundPage`; and `ProbeAsync` classified a confirmed
+local-credential loss as a generic runtime failure instead of escalating to
+`REAUTHORIZATION_REQUIRED`, so the frontend's existing `REAUTHORIZE_AFTER_STORE_LOSS` recovery
+button/copy could never actually be reached by a probe — plus the frontend's own `probe()` handler
+never refreshed the selected account's `Version` after probing, so the immediate next reconnect
+attempt would have failed with a spurious concurrency conflict. All three fixed; see the handoff
+doc's RESOLVED section for exact evidence.
+
+Independent Astra/SOL gate review remains required before this is treated as a certified
+implementation.
+
+The candidate implementation is foundation plus deterministic fake provider only. It does not
+include real Mercado Livre OAuth/HTTP/account inspection, TikTok or Shopee code, capability seed
+changes, listings/orders/Sale ingestion, live fee calls, publication, inventory, analytics, ads,
+shipping, webhooks or polling. TikTok seller authorization/token lifecycle is an explicit debt
+gate; Shopee remains blocked on current official BR evidence.
+
+**Consolidated correction:** G-01..G-08 and RT-01..RT-03 are specified in the candidate:
+actor/browser-bound one-time sessions; one PostgreSQL terminal operation arbiter shared by
+callback, refresh, startup and Quartz; fair housekeeping; atomic protected files and stable
+external key ring; provider-wide pre-identity safety fence and conservative duplicate identity
+policy; fresh credential reference generation after store/key loss; four authorization and three
+runtime states; explicit S8B metadata/endpoint upgrade; fake only in isolated test hosts;
+unchanged local fee contract; catalog-only diagnostics and callback-query suppression. S8C.4
+owns live-fee contract evolution.
+Single-instance provider execution is mandatory until distributed fencing is certified.
+
+**Exit:** an implementation now exists (see status note above) but has not been independently
+certified. Exit requires an independent Astra/SOL gate review of the delivered implementation
+against ADR-0024's G-01..G-08 and RT-01..RT-03 before S8C.1 is treated as complete.
+
 ### S8C — Provider integrations and operational order ingestion — AFTER S8C.0 GATE
 
 Implement only capabilities validated by S8C.0. Commerce owns provider adapters/external order

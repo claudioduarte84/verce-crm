@@ -14,8 +14,22 @@ public enum ChannelOfferPriceSource { PRICING_ENGINE, MANUAL, IMPORTED_OBSERVED 
 public enum ProviderCapabilityState { UNKNOWN, SUPPORTED, UNSUPPORTED }
 [JsonConverter(typeof(JsonStringEnumConverter<AccountCapabilityState>))]
 public enum AccountCapabilityState { UNKNOWN, GRANTED, DENIED }
-[JsonConverter(typeof(JsonStringEnumConverter<MarketplaceConnectionState>))]
-public enum MarketplaceConnectionState { NOT_CONFIGURED, DISCONNECTED, CONNECTED, ERROR }
+[JsonConverter(typeof(JsonStringEnumConverter<MarketplaceAuthorizationState>))]
+public enum MarketplaceAuthorizationState { NOT_CONNECTED, CONNECTED, REAUTHORIZATION_REQUIRED, REVOKED }
+[JsonConverter(typeof(JsonStringEnumConverter<MarketplaceRuntimeAvailability>))]
+public enum MarketplaceRuntimeAvailability { UNKNOWN, AVAILABLE, UNAVAILABLE }
+[JsonConverter(typeof(JsonStringEnumConverter<MarketplaceAuthorizationSessionStatus>))]
+public enum MarketplaceAuthorizationSessionStatus { PENDING, CLAIMED, COMPLETED, FAILED, EXPIRED, REVOKED }
+[JsonConverter(typeof(JsonStringEnumConverter<MarketplaceAccountOperationKind>))]
+public enum MarketplaceAccountOperationKind { CONNECT_NEW, RECONNECT, REFRESH, DISCONNECT }
+[JsonConverter(typeof(JsonStringEnumConverter<MarketplaceAccountOperationPhase>))]
+public enum MarketplaceAccountOperationPhase { PREPARED, EXTERNAL_IN_FLIGHT, SECRET_PERSISTED }
+[JsonConverter(typeof(JsonStringEnumConverter<MarketplaceAccountOperationDecision>))]
+public enum MarketplaceAccountOperationDecision { PENDING, CONFIRMED, FAIL_CLOSED }
+[JsonConverter(typeof(JsonStringEnumConverter<MarketplaceAccountOperationCleanupState>))]
+public enum MarketplaceAccountOperationCleanupState { NOT_REQUIRED, PENDING, DONE }
+[JsonConverter(typeof(JsonStringEnumConverter<CredentialImpact>))]
+public enum CredentialImpact { UNKNOWN, PRESERVES_EXISTING, MAY_SUPERSEDE_EXISTING }
 [JsonConverter(typeof(JsonStringEnumConverter<MarketplaceSyncState>))]
 public enum MarketplaceSyncState { NEVER_SYNCED, SYNCED, ERROR }
 [JsonConverter(typeof(JsonStringEnumConverter<MarketplaceListingStatus>))]
@@ -39,6 +53,14 @@ public static class CommercePolicy
 
     public static bool HasEffectiveCapability(ProviderCapabilityState provider, AccountCapabilityState account, bool accountActive) =>
         accountActive && provider == ProviderCapabilityState.SUPPORTED && account == AccountCapabilityState.GRANTED;
+
+    /// <summary>Business execution is deliberately stricter than control-plane authorization/probe work.</summary>
+    public static bool HasEffectiveExecution(ProviderCapabilityState provider, AccountCapabilityState grant, bool accountActive,
+        bool salesChannelExistsAndActiveMarketplace, MarketplaceAuthorizationState authorization, MarketplaceRuntimeAvailability runtime,
+        bool providerFenceClear, bool confirmedCredentialResolvable) =>
+        HasEffectiveCapability(provider, grant, accountActive) && salesChannelExistsAndActiveMarketplace &&
+        authorization == MarketplaceAuthorizationState.CONNECTED && runtime != MarketplaceRuntimeAvailability.UNAVAILABLE &&
+        providerFenceClear && confirmedCredentialResolvable;
 }
 
 [Auditable]
@@ -86,17 +108,30 @@ public sealed class MarketplaceAccount : AggregateRoot
     private readonly List<MarketplaceAccountCapability> _capabilities=[];
     private MarketplaceAccount() { }
     public MarketplaceAccount(string providerCode, string externalAccountId, Guid salesChannelId, string displayName, string? credentialReference=null)
-    { ProviderCode=MarketplaceProvider.RequiredCode(providerCode); ExternalAccountId=MarketplaceProvider.Required(externalAccountId,1,200); if(salesChannelId==Guid.Empty) throw new ArgumentException("MARKETPLACE_ACCOUNT_CHANNEL_REQUIRED"); SalesChannelId=salesChannelId; DisplayName=MarketplaceProvider.Required(displayName,2,200); CredentialReference=Optional(credentialReference,300); Active=true; }
-    public string ProviderCode {get;private set;}=string.Empty; public string ExternalAccountId {get;private set;}=string.Empty; public Guid SalesChannelId {get;private set;} public string DisplayName {get;private set;}=string.Empty; public bool Active {get;private set;} public string? CredentialReference {get;private set;} public MarketplaceConnectionState ConnectionState {get;private set;}=MarketplaceConnectionState.NOT_CONFIGURED; public MarketplaceSyncState SyncState {get;private set;}=MarketplaceSyncState.NEVER_SYNCED; public DateTimeOffset? LastSyncAttemptAt {get;private set;} public DateTimeOffset? LastSuccessfulSyncAt {get;private set;} public DateTimeOffset? LastFailureAt {get;private set;} public string? LastError {get;private set;} public IReadOnlyList<MarketplaceAccountCapability> Capabilities=>_capabilities.AsReadOnly();
-    public void Update(string displayName,string? credentialReference){DisplayName=MarketplaceProvider.Required(displayName,2,200);CredentialReference=Optional(credentialReference,300);}
+        : this(Guid.CreateVersion7(), providerCode, externalAccountId, salesChannelId, displayName, credentialReference) { }
+    /// <summary>Used by the authorization workflow so the account identity written into the
+    /// protected envelope is the aggregate identity that is later committed.</summary>
+    public MarketplaceAccount(Guid id, string providerCode, string externalAccountId, Guid salesChannelId, string displayName, string? credentialReference=null)
+        : base(id)
+    { if (id == Guid.Empty) throw new ArgumentException("MARKETPLACE_ACCOUNT_ID_REQUIRED"); ProviderCode=MarketplaceProvider.RequiredCode(providerCode); ExternalAccountId=MarketplaceProvider.Required(externalAccountId,1,200); if(salesChannelId==Guid.Empty) throw new ArgumentException("MARKETPLACE_ACCOUNT_CHANNEL_REQUIRED"); SalesChannelId=salesChannelId; DisplayName=MarketplaceProvider.Required(displayName,2,200); if (!string.IsNullOrWhiteSpace(credentialReference)) throw new ArgumentException("MARKETPLACE_CREDENTIAL_REFERENCE_SERVER_MANAGED"); Active=true; Connection=MarketplaceAccountConnection.NotConnected(Id); }
+    public string ProviderCode {get;private set;}=string.Empty; public string ExternalAccountId {get;private set;}=string.Empty; public Guid SalesChannelId {get;private set;} public string DisplayName {get;private set;}=string.Empty; public bool Active {get;private set;} public string? CredentialReference {get;private set;} public MarketplaceSyncState SyncState {get;private set;}=MarketplaceSyncState.NEVER_SYNCED; public DateTimeOffset? LastSyncAttemptAt {get;private set;} public DateTimeOffset? LastSuccessfulSyncAt {get;private set;} public MarketplaceAccountConnection Connection { get; private set; } = null!; public IReadOnlyList<MarketplaceAccountCapability> Capabilities=>_capabilities.AsReadOnly();
+    public void Update(string displayName){DisplayName=MarketplaceProvider.Required(displayName,2,200);}
     public void RejectSalesChannelReassignment(Guid salesChannelId){if(salesChannelId!=SalesChannelId) throw new ArgumentException("MARKETPLACE_ACCOUNT_CHANNEL_IMMUTABLE");}
     public void Activate()=>Active=true; public void Deactivate()=>Active=false;
-    public void RecordRuntimeFailure(string error,DateTimeOffset now){ConnectionState=MarketplaceConnectionState.ERROR;SyncState=MarketplaceSyncState.ERROR;LastSyncAttemptAt=now;LastFailureAt=now;LastError=Optional(error,1000)??"RUNTIME_FAILURE";}
-    public void SetCapability(string capability,AccountCapabilityState state){var code=MarketplaceProviderCapability.CapabilityCodeValue(capability);var current=_capabilities.SingleOrDefault(x=>x.CapabilityCode==code);if(current is null)_capabilities.Add(new MarketplaceAccountCapability(Id,code,state));else current.SetState(state);}
+    public void RecordRuntimeFailure(string classification, DateTimeOffset now) => Connection.MarkUnavailable("TRANSIENT", classification, now);
+    public void RecordRuntimeFailure(string classification, string safeCode, DateTimeOffset now) => Connection.MarkUnavailable(classification, safeCode, now);
+    public void MarkAvailable(DateTimeOffset now) => Connection.MarkAvailable(now);
+    public void SetCapability(string capability,AccountCapabilityState state, string source = "LEGACY_MANUAL", string? providerReasonCode = null, DateTimeOffset? verifiedAt = null){var code=MarketplaceProviderCapability.CapabilityCodeValue(capability);var current=_capabilities.SingleOrDefault(x=>x.CapabilityCode==code);if(current is null)_capabilities.Add(new MarketplaceAccountCapability(Id,code,state,source,providerReasonCode,verifiedAt));else current.SetState(state,source,providerReasonCode,verifiedAt);}
+    public void InstallConfirmedCredential(string reference, long version, Guid operationId, DateTimeOffset now) { CredentialReference=RequiredCredentialReference(reference); Connection.Confirm(operationId, version, now); }
+    public void RequireReauthorization(string safeCode, DateTimeOffset now) => Connection.RequireReauthorization(safeCode, now);
+    public void Revoke(DateTimeOffset now) => Connection.Revoke(now);
+    public void ClearCredential(DateTimeOffset now) { CredentialReference=null; Connection.ClearConfirmedCredential(now); }
+    public void EnsureConnection() => Connection ??= MarketplaceAccountConnection.NotConnected(Id);
+    private static string RequiredCredentialReference(string value){var v=Optional(value,300);return v ?? throw new ArgumentException("MARKETPLACE_CREDENTIAL_REFERENCE_REQUIRED");}
     private static string? Optional(string? value,int max){if(string.IsNullOrWhiteSpace(value))return null;var v=value.Trim();if(v.Length>max)throw new ArgumentException("FIELD_TOO_LONG");return v;}
 }
 public sealed class MarketplaceAccountCapability : IOwnedBy<MarketplaceAccount>, IJoinTable
-{ private MarketplaceAccountCapability(){} internal MarketplaceAccountCapability(Guid accountId,string capability,AccountCapabilityState state){MarketplaceAccountId=accountId;CapabilityCode=capability;State=state;} public Guid MarketplaceAccountId{get;private set;} public Guid ParentId=>MarketplaceAccountId; public string CapabilityCode{get;private set;}=string.Empty; public AccountCapabilityState State{get;private set;} public DateTimeOffset UpdatedAt{get;private set;}=DateTimeOffset.UtcNow; public DateTimeOffset? VerifiedAt{get;private set;} internal void SetState(AccountCapabilityState state){State=state;UpdatedAt=DateTimeOffset.UtcNow;} }
+{ private MarketplaceAccountCapability(){} internal MarketplaceAccountCapability(Guid accountId,string capability,AccountCapabilityState state,string source,string? providerReasonCode,DateTimeOffset? verifiedAt){MarketplaceAccountId=accountId;CapabilityCode=capability;SetState(state,source,providerReasonCode,verifiedAt);} public Guid MarketplaceAccountId{get;private set;} public Guid ParentId=>MarketplaceAccountId; public string CapabilityCode{get;private set;}=string.Empty; public AccountCapabilityState State{get;private set;} public string Source{get;private set;}="LEGACY_MANUAL"; public string? ProviderReasonCode{get;private set;} public DateTimeOffset UpdatedAt{get;private set;}=DateTimeOffset.UtcNow; public DateTimeOffset? VerifiedAt{get;private set;} internal void SetState(AccountCapabilityState state,string source="LEGACY_MANUAL",string? providerReasonCode=null,DateTimeOffset? verifiedAt=null){if(source.Length>32)throw new ArgumentException("MARKETPLACE_CAPABILITY_SOURCE_INVALID");if(providerReasonCode?.Length>64)throw new ArgumentException("MARKETPLACE_CAPABILITY_REASON_INVALID");State=state;Source=source;ProviderReasonCode=providerReasonCode;VerifiedAt=verifiedAt;UpdatedAt=DateTimeOffset.UtcNow;} }
 
 [Auditable]
 public sealed class MarketplaceListing : AggregateRoot

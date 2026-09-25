@@ -102,10 +102,20 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
     private static (string? oldJson, string? newJson, string[]? changedColumns) ExtractValues(EntityEntry entry)
     {
+        // ADR-0024 G-08: MarketplaceAccount.CredentialReference is [Auditable] but is an opaque
+        // pointer into the protected credential store, not a business scalar — the generic
+        // interceptor must never write it into old/new JSON or a changed-column payload. State/
+        // browser hashes and protected handles live only on non-[Auditable] technical entities
+        // (MarketplaceAuthorizationSession/MarketplaceAccountOperation), so they never reach this
+        // path at all; CredentialReference is the one exception that does.
         var isSecret = entry.Metadata.GetProperties()
             .Where(p => p.Name.Contains("ApiKey", StringComparison.OrdinalIgnoreCase)
                      || p.Name.Contains("Secret", StringComparison.OrdinalIgnoreCase)
-                     || p.Name.Contains("Password", StringComparison.OrdinalIgnoreCase))
+                     || p.Name.Contains("Password", StringComparison.OrdinalIgnoreCase)
+                     || p.Name.Equals("CredentialReference", StringComparison.OrdinalIgnoreCase)
+                     || p.Name.Contains("StateHash", StringComparison.OrdinalIgnoreCase)
+                     || p.Name.Contains("BrowserBindingHash", StringComparison.OrdinalIgnoreCase)
+                     || p.Name.Contains("ProtectedTransientReference", StringComparison.OrdinalIgnoreCase))
             .Select(p => p.Name)
             .ToHashSet();
 
@@ -129,7 +139,9 @@ public sealed class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
         if (entry.State == EntityState.Modified)
         {
-            changed = entry.Properties.Where(p => p.IsModified).Select(p => p.Metadata.Name).ToList();
+            // ADR-0024 G-08: the changed-column payload itself must not name a suppressed field.
+            changed = entry.Properties.Where(p => p.IsModified && !isSecret.Contains(p.Metadata.Name))
+                .Select(p => p.Metadata.Name).ToList();
         }
 
         var options = new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };

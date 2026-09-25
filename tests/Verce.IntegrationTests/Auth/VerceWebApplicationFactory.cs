@@ -1,10 +1,13 @@
 using System.Linq;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Verce.SharedKernel.Time;
 
@@ -50,7 +53,18 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
     private readonly IReadOnlyDictionary<string, string?> _extraConfiguration;
     private readonly Dictionary<string, string?> _settings;
     private readonly IClock? _clockOverride;
+    private readonly Action<IServiceCollection>? _configureTestServices;
+    private readonly bool _useRealKestrelServer;
+    private readonly string? _realKestrelUrls;
     private bool _environmentLockHeld;
+    private IHost? _realKestrelHost;
+
+    /// <summary>Only set when this factory was constructed with <c>useRealKestrelServer: true</c>
+    /// (the browser-driven E2E host — <c>tests/Verce.Marketplaces.E2EHost</c> — never in-process
+    /// PostgreSQL integration tests) — the real bound address(es) of the genuine Kestrel server a
+    /// real browser can reach over real sockets, as opposed to <see cref="WebApplicationFactory{TEntryPoint}.Server"/>'s
+    /// in-memory <c>TestServer</c> transport every other caller of this factory keeps using.</summary>
+    public IReadOnlyList<string>? RealServerAddresses { get; private set; }
 
     /// <param name="connectionString">The real PostgreSQL connection string.</param>
     /// <param name="extraConfiguration">Additional configuration overrides — e.g. a host-execution
@@ -63,11 +77,23 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
     /// resolution uses <see cref="IClock.OrganizationToday"/> (America/Sao_Paulo), not
     /// <c>UtcNow.Date</c>, at a real UTC/BRT calendar boundary. Null (the default) leaves
     /// production's real wall clock untouched for every other test.</param>
-    public VerceWebApplicationFactory(string connectionString, IReadOnlyDictionary<string, string?>? extraConfiguration = null, IClock? clockOverride = null)
+    /// <param name="useRealKestrelServer">S8C.1 third-round mandate: when true, this factory binds
+    /// a REAL Kestrel server (genuine TCP sockets) instead of the in-memory <c>TestServer</c> every
+    /// other caller uses, so a real browser driven by Playwright can reach it over real HTTP. Only
+    /// <c>tests/Verce.Marketplaces.E2EHost</c> (a separate, test-owned executable — never
+    /// <c>Verce.Api</c>'s own composition) sets this; every one of the 461 existing PostgreSQL
+    /// integration tests leaves it false and is completely unaffected.</param>
+    /// <param name="realKestrelUrls">Semicolon-separated URLs Kestrel binds to when
+    /// <paramref name="useRealKestrelServer"/> is true (e.g. "https://localhost:7246"). Ignored
+    /// otherwise. Null lets Kestrel pick its own default/dynamic address.</param>
+    public VerceWebApplicationFactory(string connectionString, IReadOnlyDictionary<string, string?>? extraConfiguration = null, IClock? clockOverride = null, Action<IServiceCollection>? configureTestServices = null, bool useRealKestrelServer = false, string? realKestrelUrls = null)
     {
         _connectionString = connectionString;
         _extraConfiguration = extraConfiguration ?? new Dictionary<string, string?>();
         _clockOverride = clockOverride;
+        _configureTestServices = configureTestServices;
+        _useRealKestrelServer = useRealKestrelServer;
+        _realKestrelUrls = realKestrelUrls;
 
         _settings = new Dictionary<string, string?>
         {
@@ -134,6 +160,17 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
         builder.UseEnvironment("Development");
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(_settings));
 
+        // Real-Kestrel mode only (tests/Verce.Marketplaces.E2EHost): WebApplicationFactory's
+        // default content-root discovery walks up from the CALLING assembly's own directory
+        // looking for a sibling matching the entry-point assembly's simple name ("Verce.Api"),
+        // which only happens to resolve correctly for callers that sit at tests/<Project>/ two
+        // levels under the repository root, like Verce.IntegrationTests. A different caller
+        // directory layout resolves the wrong path entirely. Verce.Api's own content files
+        // (appsettings*.json) are already copied transitively into THIS process's own output
+        // directory via the ProjectReference chain (proven by inspection, not assumed), so using
+        // this process's own base directory as the content root is exact, not a guess.
+        if (_useRealKestrelServer) builder.UseContentRoot(AppContext.BaseDirectory);
+
         // B2 (S2 final blockers): the generic host's default logging (Host.CreateDefaultBuilder)
         // adds the Windows EventLog provider automatically on Windows. EventLogLoggerProvider
         // wraps a per-machine/per-source OS handle (System.Diagnostics.EventLogInternal) that is
@@ -154,7 +191,93 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
         {
             services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.Zero);
             if (_clockOverride is not null) services.Replace(ServiceDescriptor.Singleton(_clockOverride));
+            _configureTestServices?.Invoke(services);
         });
+    }
+
+    /// <summary>
+    /// S8C.1 third round: builds a genuine Kestrel-bound host, reachable by real browser/real HTTP
+    /// (Playwright), instead of the in-memory <c>TestServer</c> transport <see cref="WebApplicationFactory{TEntryPoint}"/>
+    /// uses by default — <c>Verce.Api</c>'s own composition (Program.cs) is completely untouched
+    /// either way; only which server implementation THIS test-owned factory hands it differs.
+    ///
+    /// The base framework's own <c>EnsureServer()</c>/<c>CreateClient()</c> machinery is typed
+    /// against <c>TestServer</c>, so a throwaway <c>TestServer</c>-backed host is still built and
+    /// started (from the SAME <paramref name="builder"/>, before any Kestrel-specific
+    /// configuration is layered on) purely to satisfy that internal contract — it never serves any
+    /// real request. The REAL Kestrel host is built and started separately, immediately after, and
+    /// its bound address(es) are captured in <see cref="RealServerAddresses"/> for the caller
+    /// (<c>tests/Verce.Marketplaces.E2EHost</c>'s own Program.cs) to hand to the browser/Playwright.
+    /// This is the standard, widely-documented "real HTTP server via WebApplicationFactory"
+    /// technique (e.g. Microsoft.AspNetCore.Mvc.Testing samples for browser-driven E2E), not a
+    /// framework hack — <c>IHostBuilder.Build()</c> may legitimately be called more than once,
+    /// each call replaying the same accumulated configuration into an independent host/DI
+    /// container.
+    /// </summary>
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        if (!_useRealKestrelServer) return base.CreateHost(builder);
+
+        // Built but deliberately never Started: this app registers real IHostedServices (Quartz
+        // schedulers, seed services, the outbox dispatcher) that mutate the SAME PostgreSQL
+        // database the real Kestrel host below also starts — starting BOTH concurrently races
+        // Quartz's own lock-table bootstrap against itself (observed directly: PostgreSQL 25P02,
+        // "current transaction is aborted", from two StdRowLockSemaphore initializations running
+        // at once). This throwaway host exists ONLY so WebApplicationFactory's own internal
+        // bookkeeping (typed against TestServer) has a built host to hold onto; nothing ever
+        // sends it a real request (Playwright never calls CreateClient()/Server on this factory),
+        // so its hosted services never need to run at all.
+        //
+        // Development environment (set above) makes the generic host default ServiceProviderOptions
+        // to ValidateOnBuild=true/ValidateScopes=true, which EAGERLY constructs every registered
+        // singleton — including the local marketplace credential store, which opens an exclusive
+        // (FileShare.None) lock file — during Build() itself, not merely on first use. Left on for
+        // BOTH Build() calls below, the throwaway host's eager construction and the real host's own
+        // eager construction race for the SAME exclusive lock file (same configuration, same path)
+        // and the loser throws IOException (observed directly). Validation is real, useful
+        // Development behavior that matters for the host actually serving traffic, so it is
+        // disabled ONLY for this throwaway, never-requested host and left at its genuine default
+        // for the real Kestrel host built right after.
+        //
+        // WebApplicationFactory's own DeferredHost machinery calls StartAsync() on WHATEVER this
+        // method returns immediately after it returns — there is no way to prevent that call from
+        // happening, only to make it harmless. Every IHostedService (Quartz schedulers, seed
+        // services, the marketplace startup-recovery sweep) is therefore stripped from the
+        // throwaway build's own services — confirmed necessary by direct observation: leaving them
+        // in place raced this SAME throwaway host's hosted services against the real Kestrel
+        // host's already-running ones for the exact same PostgreSQL rows and the exact same
+        // credential-store lock file, regardless of which of the two this code itself called
+        // Start() on.
+        builder.ConfigureWebHost(webHostBuilder => webHostBuilder
+            .UseDefaultServiceProvider(options =>
+            {
+                options.ValidateOnBuild = false;
+                options.ValidateScopes = false;
+            })
+            .ConfigureServices(services => services.RemoveAll(typeof(IHostedService))));
+        var throwawayTestHost = builder.Build();
+
+        builder.ConfigureWebHost(webHostBuilder =>
+        {
+            webHostBuilder.UseKestrel();
+            if (!string.IsNullOrWhiteSpace(_realKestrelUrls)) webHostBuilder.UseUrls(_realKestrelUrls);
+            // Restores the genuine Development default for the host that actually serves traffic —
+            // replayed last in the accumulated ConfigureWebHost sequence, so it wins over the
+            // throwaway-only override above for THIS Build() call.
+            webHostBuilder.UseDefaultServiceProvider(options =>
+            {
+                options.ValidateOnBuild = true;
+                options.ValidateScopes = true;
+            });
+        });
+        _realKestrelHost = builder.Build();
+        _realKestrelHost.Start();
+
+        var server = _realKestrelHost.Services.GetRequiredService<IServer>();
+        var addressesFeature = server.Features.Get<IServerAddressesFeature>();
+        RealServerAddresses = addressesFeature?.Addresses.ToArray() ?? [];
+
+        return throwawayTestHost;
     }
 
     private static void RemoveEventLogProvider(IServiceCollection services)
@@ -180,6 +303,15 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
     {
         try
         {
+            // Deliberately never lets a StopAsync failure (e.g. a host whose own StartAsync never
+            // fully completed) skip Dispose() — Dispose() is what releases process-exclusive
+            // resources a singleton may hold (e.g. the local credential store's own lock file), and
+            // it must run even when graceful shutdown did not.
+            if (_realKestrelHost is { } realHost)
+            {
+                try { await realHost.StopAsync(); }
+                finally { realHost.Dispose(); }
+            }
             await base.DisposeAsync();
         }
         finally

@@ -54,6 +54,8 @@ its own work; a different model reviews this delivery.
 | [0022](ADR-0022-pricing-override-discount-bracket-precedence.md) | Pricing Override, Discount and Bracket Precedence | Accepted (pending external review) | One-channel order, manual override and post-discount fee-bracket precedence with explainable immutable snapshots |
 | [0023](ADR-0023-s8b-commerce-foundation.md) | S8B Commerce Foundation | Accepted (pending external review) | Fifteenth Commerce module; ChannelOffer intent separated from MarketplaceListing observation; provider-neutral capabilities, reconciliation, read compositions and channel economics without provider integration |
 
+| [0024](ADR-0024-s8c1-marketplace-connector-authorization-foundation.md) | S8C.1 Marketplace Connector and Authorization Foundation | Candidate (pending final independent Astra regate) | G-01..G-08 and RT-01..RT-03: bound sessions, one PostgreSQL operation arbiter, conservative duplicate identity handling, new secret generation after store loss, S8B upgrade and test-only fake; compliance checks in ADR |
+
 ## Template
 
 ```markdown

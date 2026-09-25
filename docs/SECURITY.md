@@ -156,6 +156,7 @@ reviewable exception. The **complete** anonymous allow-list is:
 | `/health/ready` | orchestrator readiness probe — **status word only** (see below) |
 | `POST /api/auth/login` | rate-limited, lockout-protected |
 | `GET`/`POST` `/setup-account` | consumes a single-use hashed token (§2.5); rate-limited |
+| `GET /api/commerce/marketplace-authorizations/{providerCode}/callback` | S8C.1 (ADR-0024 §2): the provider redirects the *browser* back here with no Verce session cookie of its own. Security is a one-time hashed `state`, a separate hashed browser-binding cookie, and the durable, single-claim `MarketplaceAuthorizationSession` row — never the caller's identity. Invalid/mismatched/expired/replayed state is rejected before any provider exchange |
 | static assets | the SPA shell |
 
 `/health/ready` must be anonymous because the orchestrator cannot authenticate, so it returns

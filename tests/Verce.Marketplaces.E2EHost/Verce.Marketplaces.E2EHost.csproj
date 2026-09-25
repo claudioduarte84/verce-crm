@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    ADR-0024 G-06 / S8C.1 third-round mandate: a SEPARATE, test-owned executable that reuses the
+    REAL Verce.Api application (its own Program.cs, completely unmodified) and real modules, wires
+    the S8C.1 fake marketplace connector into ITS OWN composition only (never Verce.Api's), and
+    binds a genuine Kestrel server so a real browser driven by Playwright can exercise real HTTP
+    authorization/callback/recovery journeys the in-process WebApplicationFactory-based integration
+    tests cannot reach with a real browser.
+
+    This project is never referenced BY Verce.Api or Verce.Infrastructure.Marketplaces — the
+    reference direction is the opposite (this project references them, to reuse their real code),
+    which is exactly what MarketplaceProductionIsolationTests already certifies is safe: Verce.Api's
+    own project dependency graph never gains a path to the fake connector because of this project's
+    existence. It lives under tests/, is never published, and is started only by the E2E harness's
+    own dedicated Playwright configuration (tests/e2e/playwright.marketplace.config.ts) — never by
+    the plain "dotnet run" command against src/Verce.Api, which remains the exact invocation the
+    rest of the E2E suite and any real deployment uses.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- Never produced as anything resembling a shippable/publishable artifact. -->
+    <IsPublishable>false</IsPublishable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reuses VerceWebApplicationFactory (real-Kestrel mode), MarketplaceTestHarness,
+         FakeMarketplaceConnector/FakeMarketplaceControlPlane and CapturingLoggerProvider verbatim
+         — the SAME fake code every in-process RT-01/02/03 test already uses, never a second,
+         independently-maintained copy. Verce.Api and Verce.Platform come in transitively through
+         Verce.IntegrationTests' own ProjectReferences. -->
+    <ProjectReference Include="..\Verce.IntegrationTests\Verce.IntegrationTests.csproj" />
+  </ItemGroup>
+
+</Project>

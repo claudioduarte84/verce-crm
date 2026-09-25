@@ -1261,6 +1261,203 @@ Pricing reference, `display_name text`, `external_account_id text`, `is_active b
 - Same closed capability-code check as provider capabilities.
 - Effective capability is a query intersection, not a persisted boolean.
 
+### S8C.1 proposed connection persistence — architecture correction, not migrated
+
+[ADR-0024](architecture/ADR-0024-s8c1-marketplace-connector-authorization-foundation.md)
+sections 2–6 are the authority for the single future S8C.1 migration. No migration is generated
+by this architecture correction. All timestamps below are UTC `timestamptz`; columns are
+NOT NULL unless marked nullable. Internal references are never public response fields.
+
+#### commerce.marketplace_authorization_session
+
+Commerce technical workflow; UUID v7 identity; actor is a logical Platform user reference.
+No MarketplaceAccount is required before provider verification.
+
+| Column | Type / contract |
+|---|---|
+| id | uuid PK |
+| provider_code | varchar(64), FK marketplace_provider(code), RESTRICT |
+| sales_channel_id | uuid, immutable logical Pricing reference |
+| initiated_by_user_id | uuid, immutable logical Platform reference |
+| reconnect_marketplace_account_id | uuid nullable, FK marketplace_account(id), RESTRICT |
+| reconnect_account_version | bigint nullable, captured account root Version at start |
+| requested_display_name | varchar(200) |
+| state_hash | char(64), UNIQUE, lowercase SHA-256 hex |
+| browser_binding_hash | char(64), lowercase SHA-256 hex |
+| status | varchar(16): PENDING, CLAIMED, COMPLETED, FAILED, EXPIRED, REVOKED |
+| created_at / expires_at / updated_at | timestamptz |
+| claimed_at / finished_at | timestamptz nullable |
+| safe_outcome_code | varchar(64) nullable, VERCE catalog code only |
+| protected_transient_reference | varchar(300) nullable, opaque PKCE-material handle |
+| next_cleanup_at | timestamptz nullable, terminal transient deletion eligibility |
+| cleanup_attempt_count | integer, default 0, >= 0 |
+| version | bigint, initially 1, explicit concurrency token |
+
+Checks: reconnect account ID and reconnect_account_version are both null or both present;
+reconnect_account_version >= 1 when present. expires_at = created_at + interval '15 minutes'; updated_at >= created_at; version >= 1;
+hashes match `^[0-9a-f]{64}$`. PENDING has claimed_at/finished_at null; CLAIMED has claimed_at
+non-null and finished_at null; COMPLETED/FAILED have both non-null; EXPIRED/REVOKED have
+claimed_at null and finished_at non-null. Any claimed_at must satisfy created_at <= claimed_at
+AND claimed_at < expires_at. Any finished_at >= COALESCE(claimed_at, created_at).
+EXPIRED requires finished_at >= expires_at. Terminal status requires safe_outcome_code non-null;
+PENDING/CLAIMED require it null. Outcome is a catalog code, never free provider text.
+The fixed callback/result routes are code configuration, not per-row caller input.
+
+Indexes: unique state_hash; (status, expires_at, created_at); (status, claimed_at) for abandonment;
+(next_cleanup_at, created_at, id) filtered to terminal status for fair cleanup;
+(reconnect_marketplace_account_id, status) for pending UX.
+No unique active session per actor/account: parallel sessions may exist, but operation fencing
+and expected account Version permit only one credential installation. Only conditional
+PENDING/version/unexpired claim commits before exchange; status is authoritative, timestamps
+are constrained attributes. No lease permits re-exchange. Actor authorization and channel validity
+are application guards, revalidated before completion. Business pagination never orders by UUID.
+
+Internal Quartz cleanup runs on startup and every 15 minutes, batches of 100. Logical expiry
+is immediate. CLAIMED older than two minutes enters the same operation arbiter; a CLAIMED session
+with no pre-call operation row can be failed directly by conditional session update because no
+external request was permitted. Late completion fails its conditional status/version guard.
+Candidates are located through an infrastructure-only
+bounded metadata enumeration by session/operation (no secret returned). A receipt alone never
+authorizes deletion or confirmation: lock and resolve the operation first. Terminal session and
+operation cleanup selects due rows by next_cleanup_at/created_at/id with keyset pagination; a
+failed deletion advances eligibility by exponential 1, 2, 4... minute backoff capped at one hour
+so an undeletable oldest row cannot starve later rows. Store metadata scanning retains an opaque
+cursor in Quartz persistent job data; the job cannot overlap itself.
+Physically remove terminal sessions only after transient/candidate deletion is confirmed;
+target within 24 hours while host/store available, alert and retain cleanup evidence on breach.
+Audit is durable and separate. No secret, raw state/code, PKCE verifier or provider body is stored.
+Session and operation use explicit allowlisted transactional audit rather than generic scalar
+snapshots; StateHash, BrowserBindingHash, protected handles and candidate references are excluded.
+The existing MarketplaceAccount generic audit must suppress CredentialReference in old/new JSON
+and changed-column payload when the current pointer changes. Persistent AuditLog tests prove it.
+
+#### commerce.marketplace_account_operation
+
+Technical workflow, UUID v7 PK, the sole durable credential-operation marker and terminal arbiter.
+It is committed before any authorization-code or refresh-token exchange. CONNECT_NEW may have no
+account until verified identity is resolved; its session FK is present from creation. Account
+binding and any current credential pointer change occur only in the terminal transaction.
+
+| Column | Type / contract |
+|---|---|
+| id | uuid PK; store receipt OperationId |
+| kind | varchar(16), CONNECT_NEW, RECONNECT, REFRESH, DISCONNECT |
+| phase | varchar(24), PREPARED, EXTERNAL_IN_FLIGHT, SECRET_PERSISTED |
+| decision | varchar(16), PENDING, CONFIRMED, FAIL_CLOSED |
+| cleanup_state | varchar(16), NOT_REQUIRED, PENDING, DONE |
+| marketplace_account_id | uuid nullable, FK marketplace_account(id) RESTRICT; null only for pending/failed CONNECT_NEW |
+| authorization_session_id | uuid nullable, FK marketplace_authorization_session(id) ON DELETE SET NULL after terminal cleanup; required while CONNECT_NEW/RECONNECT is pending |
+| provider_code | varchar(64), FK marketplace_provider(code) RESTRICT |
+| resolved_external_account_id | varchar(200) nullable, verified business identity; no provider payload |
+| expected_account_version | bigint nullable, >0 for RECONNECT/REFRESH/DISCONNECT |
+| previous_credential_reference | varchar(300) nullable, internal K1/base reference |
+| previous_confirmed_credential_version | bigint nullable, >0 when present |
+| candidate_credential_reference | varchar(300) nullable, internal K1 or recovery K2 |
+| candidate_credential_version | bigint nullable, >0 when present |
+| safe_result_code | varchar(64) nullable, VERCE catalog code only |
+| created_at / updated_at | timestamptz |
+| decided_at | timestamptz nullable, iff decision terminal |
+| next_cleanup_at | timestamptz nullable, due time for non-executable material |
+| cleanup_attempt_count | integer, default 0, >=0 |
+| version | bigint, initially 1, explicit optimistic concurrency token |
+
+Checks: decision PENDING iff decided_at is null; terminal decisions have decided_at and never
+reverse. CONFIRMED requires a bound account; callback CONFIRMED requires candidate
+reference/version and a session at confirmation time, which may later be nulled by terminal
+session cleanup. DISCONNECT needs no candidate. REFRESH/RECONNECT/DISCONNECT always have a
+bound account and expected version. CONNECT_NEW cannot take an account from a public request.
+Candidate version/reference are both null or both present. Cleanup PENDING/DONE is allowed only
+after terminal decision; cleanup NOT_REQUIRED is permitted while pending or when nothing must be
+deleted. Runtime validates identity/provider/channel and version against the account root and
+the store; a database CHECK cannot cross that boundary.
+
+Indexes: unique authorization_session_id WHERE non-null; unique
+`(marketplace_account_id) WHERE decision='PENDING' AND marketplace_account_id IS NOT NULL` for
+one active credential mutation per account; unique `(provider_code) WHERE decision='PENDING' AND
+phase IN ('EXTERNAL_IN_FLIGHT','SECRET_PERSISTED') AND
+kind IN ('CONNECT_NEW','RECONNECT')` for the provider-wide callback
+exchange fence; `(provider_code, decision, phase)` for execution guards/startup;
+`(next_cleanup_at, created_at, id) WHERE cleanup_state='PENDING'` for fair keyset cleanup.
+The single-instance coordinator serializes provider callback exchanges; database uniqueness is
+the final local fence. Its provider execution gate is acquired before account/reference locks;
+shared leases cover ordinary last guard/credential acquisition/send, and a callback's exclusive
+lease covers pre-send fence establishment through terminal resolution. Every database
+confirmer/resolver locks operation, then account root, then session.
+A lost commit reply is resolved by this row lock, which waits for a pending commit/rollback; one
+unlocked negative read never proves rollback. A current CONFIRMED operation is retained while
+the connection points to it. Other terminal operations remain at least 90 days after confirmed
+cleanup, subject to existing audit retention; never purge PENDING cleanup or a current operation.
+
+An infrastructure store receipt holds OperationId, CredentialReference, CredentialVersion,
+content-integrity/version evidence and persisted timestamp, with no credential bytes. It proves
+only persistence. The PostgreSQL decision and connection confirmation make material executable.
+CONNECT_NEW/RECONNECT receipts without a committed full callback transaction fail closed;
+REFRESH may confirm its exact receipt only after kind-specific account/reference/version guards.
+DISCONNECT commits REVOKED and operation CONFIRMED before deletion, with cleanup PENDING until
+delete receipt and pointer clear. Old K1 after loss, corruption or unconfirmed higher store
+version left by FAIL_CLOSED is never made current again; bound recovery
+may confirm new K2/version 1 only with session, identity, grants, actor and audit in one commit.
+
+#### commerce.marketplace_account_connection
+
+Account-owned entity with PK also FK `marketplace_account_id uuid` -> marketplace_account(id),
+CASCADE. No separate entity version: IOwnedBy<MarketplaceAccount> routes every write through
+the root and increments its existing Version once per UoW.
+
+| Column | Type / contract |
+|---|---|
+| authorization_state | varchar(32): NOT_CONNECTED, CONNECTED, REAUTHORIZATION_REQUIRED, REVOKED |
+| identity_verified_at | timestamptz nullable |
+| confirmed_credential_version | bigint nullable, > 0 when present |
+| confirmed_operation_id | uuid nullable, FK marketplace_account_operation(id) RESTRICT; points to current CONFIRMED credential installation |
+| access_expires_at / last_refresh_at | timestamptz nullable |
+| runtime_availability | varchar(16): UNKNOWN, AVAILABLE, UNAVAILABLE |
+| last_success_at / last_failure_at | timestamptz nullable |
+| last_failure_classification | varchar(32) nullable, six ADR-0024 failure classes |
+| safe_failure_code | varchar(64) nullable, VERCE catalog code |
+| provider_error_code | varchar(64) nullable, recognized sanitized adapter code |
+| provider_request_id | varchar(128) nullable, adapter-approved sanitized diagnostic ID |
+| runtime_retry_after_until | timestamptz nullable, persisted recovery lower bound |
+| created_at / updated_at | timestamptz |
+
+Checks: CONNECTED requires identity_verified_at, confirmed_credential_version and
+confirmed_operation_id non-null. The three confirmed fields are null after legacy backfill.
+last_failure_classification
+and safe_failure_code require last_failure_at. UNKNOWN permits preserved historical timestamps
+but is the authoritative current observation state. Authorization/availability have closed checks.
+External codes/IDs use the character and size policy of ADR-0024 §9. No persisted SafeMessage
+or RequiredAction: derive both from the local catalog and status precedence.
+
+The only current logical credential pointer remains marketplace_account.credential_reference.
+Connected requires that reference, matching provider/account/version in the store and a
+CONFIRMED confirmed_operation_id; application/coordinator enforce the cross-table/store checks.
+Store version is authoritative within one reference generation; confirmed_credential_version
+is its last-confirmed receipt, never incremented independently. Candidate/operation references
+are not current. The pending operation row (not separate connection marker fields) blocks use.
+Startup resolves each operation by kind before provider execution: REFRESH may recover a matching
+receipt after all guards; callback receipt alone never completes; DISCONNECT resumes deletion and
+retains REVOKED. Root optimistic concurrency and shared account/reference locks apply.
+Indexes: (authorization_state), (confirmed_operation_id).
+
+Migration backfills every S8B account with NOT_CONNECTED, UNKNOWN, null confirmed/verified
+metadata, and clears legacy credential_reference without any external lookup. Preserve account
+identity/channel/Active/sync and all listings/observations/offers/audit. Drop old account
+connection_state, last_error and generic last_failure_at; new connection is sole auth/runtime
+authority. Do not copy untrusted old error text. This is an intentional metadata reset.
+Down migration recreates conservative legacy NOT_CONFIGURED/null error fields; it cannot restore
+discarded legacy pointers/errors and is tested only on disposable databases. Business history
+must survive up/down; runtime secrets require reauthorization after downgrade.
+
+#### Account capability metadata delta
+
+Add source varchar(24) NOT NULL, CHECK LEGACY_MANUAL|AUTH_INSPECTION|PROBE_INSPECTION;
+provider_reason_code varchar(64) nullable, adapter-recognized safe code. Existing rows backfill
+LEGACY_MANUAL; retain current UNKNOWN/GRANTED/DENIED and existing timestamps. VerifiedAt is
+the last authoritative observation time; LEGACY_MANUAL is not proof of provider verification.
+New inspections emit a complete observation set, with UNKNOWN where evidence is missing, and
+update VerifiedAt only when an observation is established. No raw scope/payload is stored.
+Grants remain historical on disconnect, but are non-executable without usable authorization.
+
 ### `commerce.marketplace_listing` — aggregate root
 
 | Column | Type | Notes |

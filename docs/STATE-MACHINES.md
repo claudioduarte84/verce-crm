@@ -631,6 +631,97 @@ Capability support (`UNKNOWN|SUPPORTED|UNSUPPORTED`) and account grant
 (`UNKNOWN|GRANTED|DENIED`) are structural facts outside these transient machines. Connection or
 sync failure may block execution but never changes SUPPORTED to UNSUPPORTED or GRANTED to DENIED.
 
+### 5.7A S8C.1 corrected authorization/session/runtime machines
+
+[ADR-0024](architecture/ADR-0024-s8c1-marketplace-connector-authorization-foundation.md)
+supersedes §5.7 connection semantics upon implementation. S8B sync state is unchanged.
+
+| Session transition | Guard / effect |
+|---|---|
+| create -> PENDING | Owner + antiforgery; valid provider/active marketplace channel; 32-byte random state/browser nonce hashed; expiry = creation + 15 minutes |
+| PENDING -> CLAIMED | matching provider/browser/actor, not expired, expected Version; conditional update commits before external exchange; one winner |
+| PENDING -> EXPIRED | now >= ExpiresAt, immediate logical invalidity |
+| PENDING -> REVOKED | initiating Owner cancels/supersedes transaction; no exchange |
+| CLAIMED -> COMPLETED | operation row CONFIRMED in the same transaction as verified identity/context, current credential, account/grants/audit and session |
+| CLAIMED -> FAILED | operation FAIL_CLOSED for code rejection, mismatch, exchange failure/ambiguity, lost persistence or abandonment after two minutes |
+| terminal -> deleted | Quartz has resolved the operation's irreversible decision and removed transient/non-executable candidate material; audit retained |
+
+COMPLETED, FAILED, EXPIRED and REVOKED are terminal. No CLAIMED reclaim or retry exchange.
+Failure after claim always needs a new session. The 60-second callback deadline is below the
+two-minute abandonment threshold; completion requires current CLAIMED/version and operation
+PENDING. Late workers cannot commit after the terminal arbiter has failed the operation closed.
+Actor permission is rechecked on begin/claim/final commit. Two new sessions racing one external
+identity produce one database account and a safe reconnect-required conflict; the later exchange
+may require the winner to reauthorize. A uniqueness exception rolls back and reloads through a
+new transaction/DbContext before resolving the loser and winner under the operation arbiter.
+
+| Credential operation transition | Guard / effect |
+|---|---|
+| create -> PREPARED / PENDING | durable operation row before any code or refresh-token request; account may be null only for new authorization |
+| PREPARED -> EXTERNAL_IN_FLIGHT / PENDING | durable before send; callback operations establish the provider-wide safety fence |
+| EXTERNAL_IN_FLIGHT -> SECRET_PERSISTED / PENDING | exact store receipt observed; not authorization confirmation; provider fence remains |
+| PENDING -> CONFIRMED | lock operation row before store CAS, hold through DB commit; connection and, for callbacks, session/identity/grants/actor/audit commit together |
+| PENDING -> FAIL_CLOSED | same row lock; impossible to confirm later; deny affected credentials after sent/unknown request |
+| CONFIRMED or FAIL_CLOSED -> cleanup PENDING -> DONE | unused candidate/retired material removed only after terminal decision; current confirmed reference never deleted |
+
+`Decision {PENDING, CONFIRMED, FAIL_CLOSED}` is irreversible and separate from progress phase
+`{PREPARED, EXTERNAL_IN_FLIGHT, SECRET_PERSISTED}` and cleanup state
+`{NOT_REQUIRED, PENDING, DONE}`. The PostgreSQL operation row is the only durable credential
+operation marker. Every callback, refresh resolver, startup worker and Quartz worker locks it
+before terminal arbitration. Row lock waits for an in-progress commit/rollback; one negative
+snapshot never proves rollback. A store receipt proves only persistence. CONNECT_NEW/RECONNECT
+can be CONFIRMED only by their complete callback transaction, never by receipt-only startup
+recovery; REFRESH may confirm a matching receipt after account/reference/version guards. A
+provider-wide callback fence blocks other credential execution until terminal resolution; if
+identity is unknown after a crash, startup fails the operation and marks provider accounts
+REAUTHORIZATION_REQUIRED before releasing the fence. DISCONNECT commits REVOKED and operation
+CONFIRMED before secret deletion; cleanup failure leaves deletion pending, never re-enables use.
+The single-instance provider execution gate holds a shared lease through each final guard and
+provider send; callback holds the exclusive lease from pre-send fence establishment to terminal
+resolution. Acquire it before account locks. Late operational responses recheck current confirmed
+operation/root Version before persisting runtime or grants.
+
+| Account authorization transition | Meaning |
+|---|---|
+| migration -> NOT_CONNECTED | legacy identity retained, arbitrary legacy pointer cleared |
+| NOT_CONNECTED/REAUTHORIZATION_REQUIRED/REVOKED -> CONNECTED | successful explicitly bound reconnect; identity exact; confirmed protected credential |
+| new verified account -> CONNECTED | successful new-session callback with unique identity |
+| CONNECTED -> CONNECTED | refresh persisted and confirmed; starting reconnect alone does not remove existing usable credential |
+| CONNECTED -> REAUTHORIZATION_REQUIRED | revoked/invalid refresh, after-send ambiguity, lost/unreadable secret, unrecoverable write/CAS or orphan operation |
+| CONNECTED -> REAUTHORIZATION_REQUIRED | duplicate/new exchange may supersede the same provider identity under UNKNOWN/MAY_SUPERSEDE impact, including an inactive account; histories preserved |
+| any -> REVOKED | Owner disconnect, immediate local denial, idempotent deletion; Active/history/grants retained |
+
+There is no persistent AUTHORIZATION_PENDING or ERROR. A session failure proven before provider
+send preserves existing authorization. After reconnect exchange may have been sent, its durable
+operation suspends execution; failure cannot silently reinstate old tokens. After confirmed K1
+loss/corruption or an unconfirmed higher version left by FAIL_CLOSED, explicit bound recovery
+confirms fresh K2/version 1 with session, identity, grants, actor and audit in one transaction.
+K1 never becomes executable again even if its file or old key ring reappears. Operation-row
+arbitration, not a store receipt, resolves DB commit uncertainty.
+Active is independent; deactivation preserves credentials and identity but prevents provider work.
+Disconnect works even when inactive and sets runtime UNKNOWN.
+
+| Runtime transition | Guard / effect |
+|---|---|
+| create/migrate/connect/reconnect/disconnect -> UNKNOWN | no operational observation for this connection generation |
+| UNKNOWN/AVAILABLE -> AVAILABLE | successful controlled operation/probe |
+| UNKNOWN/AVAILABLE -> UNAVAILABLE | normalized terminal operational failure after allowed bounded read retries |
+| UNAVAILABLE -> AVAILABLE | successful Owner-controlled probe honoring Retry-After |
+| UNAVAILABLE -> UNAVAILABLE | probe fails; safe last failure updated |
+
+No DEGRADED, failure counter or unstated threshold. Runtime persists across restart with historical
+timestamps. UNKNOWN permits the first operation; UNAVAILABLE blocks ordinary automatic work,
+but not its Owner recovery probe. Probe still requires active account/usable authorization and
+registered inspector; it never fabricates structural support or a grant. Account grant UNKNOWN
+disables a business capability but cannot disable authorization/inspection needed to discover it.
+A pending operation survives restart: REFRESH may reconcile its exact matching store receipt
+only under refresh guards; CONNECT_NEW/RECONNECT require their completed callback transaction
+or fail closed. DISCONNECT resumes local deletion and retains REVOKED. Operation fencing is not
+a runtime-health state. Effective business execution also requires an existing active Marketplace
+SalesChannel, provider support, account grant and Active, confirmed credential and runtime not
+UNAVAILABLE. UNKNOWN allows the first attempt; probe bypasses UNAVAILABLE but respects the
+channel and Retry-After guards.
+
 ### 5.8 MarketplaceListing observed status and linkage (S8B target)
 
 Observed status is normalized provider reality:

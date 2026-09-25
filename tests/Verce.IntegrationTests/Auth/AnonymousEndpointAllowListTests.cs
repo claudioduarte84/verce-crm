@@ -9,9 +9,12 @@ namespace Verce.IntegrationTests.Auth;
 /// SECURITY §3.2: "An architecture test asserts no route outside this table is anonymous."
 /// The complete anonymous allow-list is: <c>/health/live</c>, <c>/health/ready</c>,
 /// <c>POST /api/auth/login</c>, <c>GET/POST /setup-account</c> (read here as the JSON action
-/// behind the SPA's /setup-account page — see AuthEndpoints.cs and the FINAL REPORT), and
-/// static assets (none served by this API). Every other endpoint must require authentication —
-/// enumerated from the REAL running app's route table, not re-declared by hand.
+/// behind the SPA's /setup-account page — see AuthEndpoints.cs and the FINAL REPORT),
+/// <c>GET /api/commerce/marketplace-authorizations/{providerCode}/callback</c> (ADR-0024 §2 —
+/// the browser carries no Verce session cookie on a provider redirect; the hashed one-time
+/// state/browser-binding pair is the real boundary), and static assets (none served by this
+/// API). Every other endpoint must require authentication — enumerated from the REAL running
+/// app's route table, not re-declared by hand.
 /// </summary>
 /// <summary>
 /// M-TESTHOST-001: every test that constructs a <see cref="VerceWebApplicationFactory"/> must
@@ -40,6 +43,12 @@ public class AnonymousEndpointAllowListTests
         "GET /api/auth/csrf",
         "POST /api/auth/login",
         "POST /api/auth/setup-account",
+        // ADR-0024 §2 (S8C.1): "HTTP callback may be anonymous; the persisted transaction
+        // supplies actor/context, not the browser's current user." The real provider redirects
+        // the browser back here with no session cookie of its own; the one-time state/browser-
+        // binding hashes plus the durable session row (not ASP.NET auth) are this route's actual
+        // security boundary — see MarketplaceAuthorizationWorkflow.CompleteCallbackAsync.
+        "GET /api/commerce/marketplace-authorizations/{providerCode}/callback",
     };
 
     [Fact]

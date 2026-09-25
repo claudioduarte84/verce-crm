@@ -66,7 +66,7 @@ test('S8B: Owner completes the local Commerce journey and Viewer remains read-on
   await page.getByRole('button', { name: 'Filtrar' }).click()
   await expect(page.getByText('0 item(ns)')).toBeVisible()
 
-  // Create a local Marketplace channel, then configure an account through its Owner-only UI.
+  // Create a local Marketplace channel — still exercised exactly as before S8C.1.
   const channelCode = uniqueCode('S8BCH')
   await page.goto('/pricing')
   const channelForm = formFor(page, 'Novo canal')
@@ -78,61 +78,38 @@ test('S8B: Owner completes the local Commerce journey and Viewer remains read-on
     channelForm.getByRole('button', { name: 'Criar canal' }).click(),
   ])
   expect(channelResponse.status()).toBe(201)
-  const channel = await channelResponse.json() as { id: string }
+
+  // S8C.1 (ADR-0024) retires manual marketplace-account creation: POST
+  // /api/commerce/marketplace-accounts now returns 410, and a real account can only be created
+  // through a completed provider authorization callback. This pure-browser harness drives the
+  // REAL, unmodified Verce.Api process (dotnet run against the compiled binary) — the S8C.1 test
+  // fake connector lives only in the Verce.IntegrationTests project and is never referenced by
+  // Verce.Api's dependency graph (ADR-0024 G-06: "no fake code is shipped in its project
+  // dependency graph"), so there is no live or fake provider this harness can complete an
+  // authorization against. Proving the actual authorization/callback/RT-01..03 behavior is done
+  // by the in-process WebApplicationFactory-based PostgreSQL integration tests
+  // (tests/Verce.IntegrationTests/Commerce/MarketplaceAuthorization*.cs), which DO wire the fake
+  // connector directly into the host's DI container. What THIS browser-level test can and does
+  // certify: the legacy manual-creation surface is gone from both the UI and the API, and the
+  // new authorization-only UI is presented correctly and never collects an external identity or
+  // credential value client-side.
+  const legacyCreateAttempt = await page.request.post('/api/commerce/marketplace-accounts', {
+    headers: { 'X-XSRF-TOKEN': decodeURIComponent((await page.evaluate(() => document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]*)/)?.[1])) ?? '') },
+    data: {},
+  })
+  expect(legacyCreateAttempt.status()).toBe(410)
 
   await page.goto('/marketplace-accounts')
-  await page.getByRole('button', { name: 'Nova conta' }).click()
-  await page.getByLabel('Provedor').selectOption('SHOPEE')
-  await page.getByLabel('Identidade externa').fill(`shop-${marker}`)
+  await expect(page.getByRole('button', { name: 'Conectar conta' })).toBeVisible()
+  await expect(page.getByLabel('Identidade externa')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Conectar conta' }).click()
+  await expect(page.getByLabel('Provedor')).toBeVisible()
   await selectByText(page.getByLabel('Canal'), channelCode)
   await page.getByLabel('Nome de exibição').fill(`Loja ${marker}`)
-  const [accountCreate] = await Promise.all([
-    page.waitForResponse(r => new URL(r.url()).pathname === '/api/commerce/marketplace-accounts' && r.request().method() === 'POST'),
-    page.getByRole('button', { name: 'Salvar conta' }).click(),
-  ])
-  expect(accountCreate.status()).toBe(204)
-  await expect(page.getByRole('button', { name: `Loja ${marker}` })).toBeVisible()
-  const accountsResponse = await page.request.get('/api/commerce/marketplace-accounts')
-  const accounts = await accountsResponse.json() as { id: string; externalAccountId: string }[]
-  const account = accounts.find(x => x.externalAccountId === `shop-${marker}`)
-  expect(account).toBeTruthy()
-
-  // Listing creation is an explicit local fixture API in S8B; no provider/network is contacted.
-  const csrf = await page.evaluate(() => document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]*)/)?.[1])
-  const externalListingId = `listing-${marker}`
-  const listingCreate = await page.request.post('/api/commerce/published-items', {
-    headers: { 'X-XSRF-TOKEN': decodeURIComponent(csrf ?? '') },
-    data: {
-      marketplaceAccountId: account!.id, externalListingId, externalSku: marker,
-      titleSnapshot: `Anúncio ${marker}`, observedPrice: 54.90, observedStatus: 'ACTIVE',
-    },
-  })
-  expect(listingCreate.status()).toBe(204)
-
-  await page.goto('/published-items')
-  await page.getByLabel('Buscar').fill(marker)
-  await page.getByRole('button', { name: 'Filtrar' }).click()
-  const listingRow = page.getByRole('listitem').filter({ hasText: `Anúncio ${marker}` })
-  await expect(listingRow).toBeVisible()
-  await expect(listingRow.getByText('UNLINKED', { exact: true })).toBeVisible()
-  await listingRow.getByRole('button', { name: 'Vincular' }).click()
-  await selectByText(page.getByLabel('Produto'), marker)
-  const compatibleOffer = page.getByLabel('Oferta compatível (opcional)')
-  await expect(compatibleOffer.locator('option').filter({ hasText: 'Somente produto' })).toHaveCount(1)
-  await expect(compatibleOffer).toHaveValue('')
-  const [linkResponse] = await Promise.all([
-    page.waitForResponse(r => new URL(r.url()).pathname.endsWith('/link')),
-    page.getByRole('button', { name: 'Confirmar vínculo' }).click(),
-  ])
-  expect(linkResponse.status()).toBe(204)
-  await expect(listingRow.getByText('LINKED', { exact: true })).toBeVisible()
-  await expect(listingRow.getByText(new RegExp(`Produto: ${marker}`))).toBeVisible()
-  const [unlinkResponse] = await Promise.all([
-    page.waitForResponse(r => new URL(r.url()).pathname.endsWith('/unlink')),
-    listingRow.getByRole('button', { name: 'Desvincular' }).click(),
-  ])
-  expect(unlinkResponse.status()).toBe(204)
-  await expect(listingRow.getByText('UNLINKED', { exact: true })).toBeVisible()
+  // "Autorizar com provedor" redirects the browser to the provider's own authorization URI —
+  // there is deliberately no local field for an external identity or a credential anywhere in
+  // this form (ADR-0024 §2: "never accepts external ID/reference").
+  await expect(page.getByRole('button', { name: 'Autorizar com provedor' })).toBeVisible()
 
   // Deactivating the only offer removes commercial-active without deleting Product or history.
   await page.goto('/catalog')
@@ -159,11 +136,15 @@ test('S8B: Owner completes the local Commerce journey and Viewer remains read-on
     await viewer.getByRole('button', { name: new RegExp(marker) }).click()
     await expect(viewer.getByRole('button', { name: 'Salvar oferta' })).not.toBeVisible()
     await expect(viewer.getByRole('button', { name: 'Ativar' })).not.toBeVisible()
-    await viewer.goto('/published-items')
-    await viewer.getByLabel('Buscar').fill(marker)
-    await viewer.getByRole('button', { name: 'Filtrar' }).click()
-    await expect(viewer.getByText(`Anúncio ${marker}`)).toBeVisible()
-    await expect(viewer.getByRole('button', { name: 'Vincular' })).not.toBeVisible()
+    // Marketplace Accounts: Viewer gets no configuration/credential controls at all (S8C.1 —
+    // CommerceEndpoints.cs Permissions.CommerceAccountsManage is Owner-only). No account was
+    // actually created above (clicking "Autorizar com provedor" would navigate to a real
+    // provider's authorization URI, which does not exist for the fake provider outside the
+    // in-process integration tests — see the comment above), so this only certifies the
+    // read-only control surface itself, not a specific connected account's detail view.
+    await viewer.goto('/marketplace-accounts')
+    await expect(viewer.getByRole('button', { name: 'Conectar conta' })).not.toBeVisible()
+    await expect(viewer.getByText('Contas são criadas e reautorizadas somente pelo fluxo seguro do provedor.', { exact: false })).toBeVisible()
   } finally {
     await viewerContext.close()
   }

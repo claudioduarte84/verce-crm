@@ -5,6 +5,7 @@
   "type": "commonjs",
   "scripts": {
     "test": "playwright test",
+    "test:marketplace": "playwright test --config=playwright.marketplace.config.ts",
     "test:run-lock": "node scripts/verify-run-lock.cjs",
     "test:harness-safety": "node scripts/verify-harness-safety.cjs",
     "test:custom-owner-email": "node scripts/verify-custom-owner-email.cjs"

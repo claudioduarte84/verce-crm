@@ -51,40 +51,15 @@ public sealed class CommerceHttpIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Marketplace_account_accepts_only_active_marketplace_channel_and_rejects_reassignment()
+    public async Task Marketplace_account_creation_requires_the_authorization_workflow()
     {
-        var provider = new MarketplaceProvider("P" + Guid.NewGuid().ToString("N"), "Provider teste");
-        var marketplace = NewChannel(SalesChannelKind.Marketplace);
-        var otherMarketplace = NewChannel(SalesChannelKind.Marketplace);
-        var inactiveMarketplace = NewChannel(SalesChannelKind.Marketplace); inactiveMarketplace.Deactivate();
-        var other = NewChannel(SalesChannelKind.Other);
-        SalesChannel direct;
-        await using (var db = _fixture.CreateContext())
-        {
-            direct = await db.Set<SalesChannel>().SingleOrDefaultAsync(x => x.Code == SalesChannel.DirectChannelCode)
-                ?? new SalesChannel(SalesChannel.DirectChannelCode, "Venda Direta", SalesChannelKind.Direct, null, null);
-            db.AddRange(provider, marketplace, otherMarketplace, inactiveMarketplace, other);
-            if (db.Entry(direct).State == EntityState.Detached) db.Add(direct);
-            await db.SaveChangesAsync();
-        }
-
         var owner = await LoggedInOwnerAsync();
-        async Task<HttpResponseMessage> Create(Guid channelId, string suffix) => await owner.PostAsync(
+        var response = await owner.PostAsync(
             "/api/commerce/marketplace-accounts",
-            new MarketplaceAccountWriteRequest(provider.Code, "account-" + suffix, channelId, "Conta " + suffix, null, null));
+            new MarketplaceAccountWriteRequest("SHOPEE", "forged", Guid.NewGuid(), "Conta forjada", "never-accepted", null));
 
-        (await Create(Guid.NewGuid(), "missing")).StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
-        (await Create(inactiveMarketplace.Id, "inactive")).StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
-        (await Create(direct.Id, "direct")).StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
-        (await Create(other.Id, "other")).StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
-        (await Create(marketplace.Id, "valid")).StatusCode.Should().Be(HttpStatusCode.NoContent);
-
-        var accounts = await (await owner.GetAsync("/api/commerce/marketplace-accounts"))
-            .Content.ReadFromJsonAsync<AccountResponse[]>();
-        var created = accounts!.Single(x => x.ExternalAccountId == "account-valid");
-        var reassignment = await owner.PutAsync($"/api/commerce/marketplace-accounts/{created.Id}",
-            new MarketplaceAccountUpdateRequest("Conta válida", null, otherMarketplace.Id, created.Version));
-        reassignment.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        response.StatusCode.Should().Be(HttpStatusCode.Gone);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("ACCOUNT_CREATION_REQUIRES_AUTHORIZATION");
     }
 
     [Fact]
@@ -285,6 +260,17 @@ public sealed class CommerceHttpIntegrationTests : IAsyncLifetime
         var listing = new MarketplaceListing(account.Id, marker, null, MarketplaceListingStatus.ACTIVE);
         await using (var db = _fixture.CreateContext())
         {
+            // M-S8C1-002 (Codex Sol regate): this test must be hermetic — it must never rely on
+            // some OTHER test in the shared PostgresCollection fixture having already inserted the
+            // "SHOPEE" provider row first. `marketplace_account.provider_code` has a real FK to
+            // `marketplace_provider.code` (fk_marketplace_account_marketplace_provider_provider_code)
+            // that correctly rejects an orphaned account — that FK is production behavior and is
+            // never weakened here. Existence-checked (not a bare Add) because the SAME shared
+            // fixture may already have this row from another test in the collection; a plain
+            // insert would then fail on the provider's own PK, which is exactly the kind of
+            // order-dependency this fix removes, not reintroduces.
+            if (!await db.Set<MarketplaceProvider>().AnyAsync(x => x.Code == "SHOPEE"))
+                db.Add(new MarketplaceProvider("SHOPEE", "Shopee"));
             db.AddRange(account, listing);
             await db.SaveChangesAsync();
         }

@@ -831,6 +831,71 @@ account. Structural provider state is `UNKNOWN|SUPPORTED|UNSUPPORTED`; account g
 `UNKNOWN|GRANTED|DENIED`. Transient failure is connection/sync/runtime health, not capability or
 grant mutation, and may block execution without rewriting those structural facts.
 
+### S8C.1 connection extension (corrected architecture candidate)
+
+[ADR-0024](architecture/ADR-0024-s8c1-marketplace-connector-authorization-foundation.md)
+supersedes the S8B connection interpretation on implementation. MarketplaceAccount retains
+durable ProviderCode + ExternalAccountId and immutable SalesChannelId; CredentialReference
+becomes a server-generated opaque pointer to the current credential generation, never writable
+in public DTOs. Normal refresh/reconnect retain the reference and advance its store-owned version;
+after confirmed store/key loss or an unconfirmed higher K1 version from a FAIL_CLOSED operation,
+explicit bound recovery retires K1 and confirms a fresh K2/version 1. An old K1 file or key
+backup cannot become current again merely by reappearing.
+Its owned MarketplaceAccountConnection is the sole authorization/runtime authority. The old
+ConnectionState, LastError and generic LastFailureAt are removed by the single migration;
+SyncState and resource-sync timestamps remain.
+
+Authorization is exactly NOT_CONNECTED|CONNECTED|REAUTHORIZATION_REQUIRED|REVOKED.
+No ERROR or AUTHORIZATION_PENDING; pending work is derived from a separate authorization
+session. Start reconnect preserves usable credentials; once its exchange may have been sent the
+durable operation row suspends use until its result is confirmed. Disconnect sets REVOKED, runtime UNKNOWN,
+denies secret reads immediately and performs idempotent local deletion while retaining history.
+
+Runtime is UNKNOWN|AVAILABLE|UNAVAILABLE; no DEGRADED. UNKNOWN permits the first controlled
+attempt; successful probe/operation makes AVAILABLE, terminal operational failure makes
+UNAVAILABLE. Owner probe is the recovery path and honors persisted Retry-After. Runtime and
+timestamps persist across restart; UNKNOWN is not synthesized by an unconfigured freshness timer.
+Ordinary business execution requires SUPPORTED + GRANTED + MarketplaceAccount.Active + an existing
+active Marketplace SalesChannel + usable authorization + runtime != UNAVAILABLE. A provider-wide
+callback operation pending after send blocks credential execution until its identity/impact is
+resolved. Connect/inspect/probe do not require unrelated business grants; probe still respects
+the active Marketplace channel and persisted Retry-After.
+
+MarketplaceAuthorizationSession stores provider/channel, initiating actor, optional intended
+reconnect account, requested label, hashed random state/browser binding, status/timestamps,
+protected transient handle and Version. It has a 15-minute lifetime; one atomic PENDING ->
+CLAIMED transition owns the exchange forever. Browser/actor/provider/channel are validated.
+New identity is provider-derived; reconnect must match its bound account exactly. An unbound new
+session discovering an existing identity returns a safe reconnect-required conflict. Under
+UNKNOWN/MAY_SUPERSEDE credential impact, the existing account becomes REAUTHORIZATION_REQUIRED,
+even if inactive; the new candidate is discarded after terminal arbitration. Two new sessions
+for one identity can leave the unique winner requiring explicit reconnect after the later
+exchange. A reconnect X returning Y never rebinds history; X and any existing Y fail closed when
+impact is unknown. The fake can invalidate the prior credential for the same identity, without
+asserting real-provider behavior.
+
+`MarketplaceAccountOperation` is the single durable PostgreSQL arbiter for CONNECT_NEW,
+RECONNECT, REFRESH and DISCONNECT. It is committed before an external code/refresh exchange.
+Its terminal decision is PENDING -> CONFIRMED or FAIL_CLOSED, never both; operation-row locks
+serialize final confirmation, compensation, startup and Quartz. Store receipts prove only
+material persistence. CONNECT_NEW/RECONNECT require session, actor, identity, channel, account,
+grants and audit in the same CONFIRMED transaction; receipt-only restart recovery cannot complete
+them. REFRESH may confirm an exact same-operation receipt after its account/reference/version
+guards. The connection points only to a currently CONFIRMED operation/reference/version; a
+candidate never becomes executable. If DB commit response is lost, a resolver waits on the
+operation row for commit or rollback before acting. Quartz startup/15-minute cleanup resolves
+abandoned claims and orphans through the same arbiter, with due-time/keyset fairness.
+
+All pre-S8C.1 accounts remain with configured identity but NOT_CONNECTED/UNKNOWN and cleared
+legacy credential pointers; successful bound reconnect establishes IdentityVerifiedAt. Generic
+account POST is retired (410), PUT allows DisplayName + Version only, and manual grant mutation
+is retired (410). No client controls ExternalAccountId or CredentialReference. Grant metadata
+is LEGACY_MANUAL|AUTH_INSPECTION|PROBE_INSPECTION, bounded safe reason and VerifiedAt.
+Outages do not change support/grants, and OAuth scopes alone do not prove business eligibility.
+For a legacy mistyped ExternalAccountId, reject the mismatched reconnect, preserve/deactivate the
+old account and its history, and authorize the correct identity separately when allowed. History
+reassociation needs a later explicit administrative workflow, never automatic mutation.
+
 ### MarketplaceListing (AR)
 
 `Id`, `MarketplaceAccountId`, `ExternalListingId`, `ExternalSku?`, `ProductId?`,
@@ -890,6 +955,12 @@ root for Product facts/cost, Pricing fee resolution and Sales aggregates. `IChan
 returns normalized fee facts and provenance `LIVE_API|CACHE|MANUAL|FALLBACK`; S8B implements only
 the local FeeRule adapter (`MANUAL`, or explicit configured `FALLBACK`). Provider HTTP adapters
 and a provider-fee cache are deferred until S8C.0 discovery.
+
+S8C.1 freezes only typed registry, authorization and account-inspection ports; resource ports
+remain conceptual. Infrastructure owns protected storage and adapter DTOs. Fake code lives in
+test-support/harness only. IChannelFeeProvider, ChannelFeeQuote and LocalFeeRuleProvider remain
+unchanged in S8C.1; S8C.4 must design account-aware live quote input/output, local IDs, fallback
+and truthful provenance before any provider implementation. No fabricated FeeRule IDs.
 
 Mutable roots use expected `Version` and the existing audit infrastructure. Permissions are
 `commerce:read` (Owner/Operator/Viewer), `commerce:manage` (Owner/Operator) and

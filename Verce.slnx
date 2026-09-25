@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Verce.Api/Verce.Api.csproj" />
     <Project Path="src/Verce.Platform/Verce.Platform.csproj" />
+    <Project Path="src/Verce.Infrastructure.Marketplaces/Verce.Infrastructure.Marketplaces.csproj" />
     <Project Path="src/Verce.SharedKernel/Verce.SharedKernel.csproj" />
   </Folder>
   <Folder Name="/src/Modules/">
@@ -35,6 +36,7 @@
     <Project Path="tests/Verce.Production.Tests/Verce.Production.Tests.csproj" />
     <Project Path="tests/Verce.Documents.Tests/Verce.Documents.Tests.csproj" />
     <Project Path="tests/Verce.IntegrationTests/Verce.IntegrationTests.csproj" />
+    <Project Path="tests/Verce.Marketplaces.E2EHost/Verce.Marketplaces.E2EHost.csproj" />
     <Project Path="tests/Verce.Platform.Tests.Fixtures.Cyclic/Verce.Platform.Tests.Fixtures.Cyclic.csproj" />
     <Project Path="tests/Verce.Platform.Tests.Fixtures.Orphan/Verce.Platform.Tests.Fixtures.Orphan.csproj" />
     <Project Path="tests/Verce.Platform.Tests/Verce.Platform.Tests.csproj" />

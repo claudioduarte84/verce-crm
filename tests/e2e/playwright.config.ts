@@ -37,6 +37,25 @@ try {
 process.once('exit', releaseHarnessLock)
 process.env.ConnectionStrings__Verce = e2eConnectionString
 
+// M-S8C1-003 (Codex Sol regate): `dotnet run --project ...` is a launcher — it spawns a SEPARATE
+// child process for the actual compiled app, so Playwright's own webServer teardown only ever
+// held a handle to the launcher, not the process actually holding the port. This mirrors the
+// pattern s2-restart-persistence.spec.ts already uses successfully for its own dedicated API
+// process: invoke the compiled DLL directly, so the process Playwright spawns AND kills is the
+// real server — no intermediate process for a tree-kill to miss.
+// NOTE: this config module is evaluated AGAIN by every Playwright worker process (see the
+// run-lock's own "re-entrancy, across processes" handling below), not once per overall run — an
+// earlier version of this fix tried to run `npm run build` here directly and it silently
+// re-ran the full frontend build before nearly every test, which is both slow and was observed
+// to destabilize `vite preview` (rebuilding `dist/` while it was actively serving from it).
+// webServer entries themselves do NOT have this problem — Playwright starts/owns each one
+// exactly once for the whole run, tracked by the one process it actually spawns — which is why
+// only the backend entry below was changed to invoke the compiled DLL directly; the frontend
+// entry's own build+preview chain is left exactly as it was.
+const repoRoot = resolve(__dirname, '..', '..')
+const apiProjectDir = resolve(repoRoot, 'src', 'Verce.Api')
+const apiDll = resolve(apiProjectDir, 'bin', 'Release', 'net10.0', 'Verce.Api.dll')
+
 export default defineConfig({
   testDir: './specs',
   fullyParallel: false,
@@ -59,11 +78,27 @@ export default defineConfig({
     { name: 'authorization', dependencies: ['operator-setup'], testMatch: /s2-authorization\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'operator.json') } },
     { name: 'supplies-operator', dependencies: ['viewer-setup'], testMatch: /s3-supplies-operator\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'operator.json') } },
     { name: 'supplies-viewer', dependencies: ['viewer-setup'], testMatch: /s3-supplies-viewer\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'viewer.json') } },
-    { name: 'chromium', dependencies: ['viewer-setup'], testIgnore: /auth\.setup\.ts|operator\.setup\.ts|viewer\.setup\.ts|s2-authorization\.spec\.ts|s3-supplies-operator\.spec\.ts|s3-supplies-viewer\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'auth.json') } },
+    // s8c1-marketplace.spec.ts is deliberately excluded here: it requires the fake marketplace
+    // connector and the "Fake E2E Provider" catalog row, both wired ONLY by
+    // tests/Verce.Marketplaces.E2EHost's own composition (ADR-0024 G-06) — never by the real,
+    // unmodified Verce.Api this config's webServer starts. See playwright.marketplace.config.ts,
+    // which targets that separate host instead.
+    { name: 'chromium', dependencies: ['viewer-setup'], testIgnore: /auth\.setup\.ts|operator\.setup\.ts|viewer\.setup\.ts|s2-authorization\.spec\.ts|s3-supplies-operator\.spec\.ts|s3-supplies-viewer\.spec\.ts|s8c1-marketplace\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'auth.json') } },
   ],
   webServer: [
     {
-      command: 'dotnet run --no-build --configuration Release --project src/Verce.Api --urls https://localhost:7246',
+      // Direct DLL invocation (see repoRoot/apiDll above) — never `dotnet run`, which would be a
+      // launcher process Playwright's teardown could lose track of. `--contentRoot` must be
+      // ABSOLUTE: with no explicit content root, ASP.NET Core defaults it to the process's
+      // current working directory (repo root, via `cwd` below) — fine on its own, but a
+      // RELATIVE `--contentRoot` value is instead resolved against the DLL's own base directory
+      // (AppContext.BaseDirectory), not the process cwd, a genuine .NET quirk confirmed by direct
+      // reproduction. Getting this wrong pointed the host at the repo root as its content root,
+      // where appsettings.Development.json does not exist (only its bin-output copy does) — the
+      // Settings:SeedOnStartup=true it carries silently never took effect, no seed data was ever
+      // created, and the failures cascaded across unrelated specs that all assume real seeded
+      // data exists. An absolute path removes the ambiguity entirely.
+      command: `dotnet "${apiDll}" --urls https://localhost:7246 --contentRoot "${apiProjectDir}"`,
       cwd: '../..',
       url: 'https://localhost:7246/health/ready',
       ignoreHTTPSErrors: true,
@@ -74,7 +109,13 @@ export default defineConfig({
       // (localhost) and each page load re-checks the session, so a full E2E run legitimately
       // needs far more than 10 such calls/minute. Raised ONLY for this test-managed host, never
       // in the production composition root.
-      env: { RateLimiting__Auth__PermitLimit: '100000', ConnectionStrings__Verce: e2eConnectionString, VERCE_E2E_RUN_ID: e2eRunId },
+      // `dotnet run` used to set ASPNETCORE_ENVIRONMENT=Development implicitly via
+      // Properties/launchSettings.json's default profile — direct DLL invocation bypasses
+      // launchSettings.json entirely (that mechanism is dotnet-run-only), so it must be set here
+      // explicitly or the host boots as Production and fails closed on the missing Data
+      // Protection certificate (correct Production behavior — this is a real difference between
+      // the two invocation styles, not a bug in either one).
+      env: { ASPNETCORE_ENVIRONMENT: 'Development', RateLimiting__Auth__PermitLimit: '100000', ConnectionStrings__Verce: e2eConnectionString, VERCE_E2E_RUN_ID: e2eRunId },
     },
     // Production preview, not `vite dev`: a long sequential E2E run hits a real Vite dev-server
     // state issue (its per-module transform/HMR pipeline can wedge after enough real round-trips

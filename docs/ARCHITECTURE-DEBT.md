@@ -271,9 +271,53 @@ the product asks for them.
 |---|---|---|
 | `VERCE_Proposta-Modelo_1.pdf` | **S7** | The default proposal's structure is fully specified; only the visual tokens (palette, typography, spacing, logo lockup) are pending — see [DEFAULT-PROPOSAL-TEMPLATE §0 and §8](DEFAULT-PROPOSAL-TEMPLATE.md) |
 | Smart-plug device selection | **S10** | `IEnergyProvider` exists; no vendor code may be written before the device is chosen |
-| Official provider capability and fee discovery (Mercado Livre, Shopee, TikTok Shop) | **S8C.0 independent gate** | [Discovery package](S8C0-OFFICIAL-PROVIDER-DISCOVERY.md) and [matrix](S8C0-CAPABILITY-MATRIX.md) prepared on 2026-09-24 from official sources; structural decisions are proposed, with no seed changes or connector implementation. |
+| Official provider capability and fee discovery (Mercado Livre, Shopee, TikTok Shop) | **S8C.0 COMPLETE** | Approved discovery at baseline 143b562; [matrix](S8C0-CAPABILITY-MATRIX.md) freezes evidence, not automatic seed promotion. Regional/auth gaps below remain open. |
+| TikTok Shop BR seller authorization and token lifecycle | **Before any TikTok S8C.1 adapter** | Official proof is still required for seller authorization, access-token lifetime, refresh behavior and rotation/single-use semantics, reauthorization/revocation, required scopes, callback flow and signing requirements. Treat every fact as `UNKNOWN`; do not infer it from global/product/order references. [ADR-0024](architecture/ADR-0024-s8c1-marketplace-connector-authorization-foundation.md) permits only a provider-neutral/fake foundation until this gate closes. |
 | Shopee current Brazil Open Platform reference and app access | **Before Shopee S8C.1** | [Official documents](https://open.shopee.com/documents) were access restricted; all eight BR capability cells remain UNKNOWN. Obtain current official BR endpoints, grants, signing, quotas, events, test facilities and order/fee semantics; historical regional docs cannot close this. |
 | TikTok Shop Brazil-local product, inventory, shipping, analytics and Shop ads entitlement | **Before those S8C waves** | [BR order workflow](https://partner.tiktokshop.com/docv2/page/br-market-updated-api-workflow-to-support-order-invoice-and-warehouse) confirms orders and shipping documents, while [product](https://partner.tiktokshop.com/docv2/page/q50o39n1), [tracking](https://partner.tiktokshop.com/docv2/page/get-tracking) and [analytics](https://partner.tiktokshop.com/docv2/page/get-shop-product-performance-list-202405) references do not establish each BR-local grant. Marketing API is separate; do not seed support or build those ports until official market/scope proof. |
 | Pre-sale fee quote outside Mercado Livre | **Before S8C.4 for each provider** | ML [listing-prices](https://developers.mercadolivre.com.br/pt_br/comissao-por-vender) is a quote; TikTok [finance transactions](https://partner.tiktokshop.com/docv2/page/get-transactions-by-order) are realized amounts. Shopee and TikTok pre-sale quote APIs remain UNKNOWN; keep local fee rules and distinguish realized fees. |
 | Marketplace order completeness and webhook security | **Before S8C.3 coverage claims and listeners** | ML [orders](https://developers.mercadolivre.com.br/pt_br/gerenciamento-de-vendas) retain up to 12 months and seller search filters canceled orders. TikTok BR history/cancellation/refund bounds and general webhook signing are unverified; Shopee docs are restricted. Require per-account interval/gap proof and official signature guidance before `COMPLETE` or webhook implementation. |
 | The external gate report as a file | informational | Deadlines in §1 are now **authoritative**, taken from the re-gate mission text; a report file would only add rationale |
+
+## S8C.1 correction — implementation and deployment gates
+
+- **Before horizontal marketplace execution:** S8C.1 assumes one application instance and the
+  local store rejects a second owning process using the same root. Do not deploy another host
+  against the same marketplace database with a different credential root: that bypasses the
+  local root lock. Implement shared-store database lease/fencing, operation-arbiter recovery and
+  multi-instance rotating-refresh/callback tests before scaling. CAS alone is insufficient.
+  No distributed infrastructure is authorized in S8C.1.
+- **Before real-provider Production activation:** select and certify a production protected-store
+  adapter with the ADR-0024 ownership/CAS/receipt semantics. S8C.1 Production has no real or fake
+  provider adapter/local-store activation; test/E2E foundation remains executable in isolation.
+- **Before S8C.4 live fees:** evolve the existing IChannelFeeProvider seam to accept account and
+  verified provider inputs, distinguish quote components/local fallback/freshness/provenance and
+  remove any need for fabricated FeeRule/FeeRuleVersion IDs. S8C.1 fee contracts stay unchanged.
+- **TikTok Shop BR seller authorization:** access lifetime, rotation/refresh, scopes, callback,
+  signing and reauthorization remain UNKNOWN as recorded above. No seller adapter before proof.
+- **Shopee BR:** current official authorization/signing/host/token and capability evidence remains
+  required; historical references cannot close this gate.
+- **Before any real (non-fake) marketplace connector adapter — G-08's HTTP client/retry layer:**
+  ADR-0024 §9/G-08 specifies named/typed `IHttpClientFactory` clients, allow-listed base URLs,
+  failure classification (`NON_RETRYABLE|RETRYABLE|RATE_LIMITED|AUTH_RENEWAL_REQUIRED|
+  USER_ACTION_REQUIRED|UNKNOWN`), send-certainty metadata, the frozen idempotent-read retry
+  policy (≤3 attempts/30s budget, 250ms/500ms backoff + jitter, Retry-After honored as a lower
+  bound), and callback/token query-and-body log suppression at the HTTP layer. **None of this is
+  implemented.** The S8C.1 implementation sessions (2026-09-25) deliberately did not build it,
+  for one concrete reason: there is no real provider HTTP call anywhere in S8C.1 to protect — the
+  only registered connector is the deterministic in-memory test fake
+  (`FakeMarketplaceConnector`), which never opens a socket, so an HTTP retry/failure-classification
+  layer would have no real request path to attach to and no way to be genuinely exercised (a
+  fake message handler proving 429/Retry-After/5xx/4xx against a layer that nothing production
+  ever calls is not real coverage — G-06's own compliance checklist requires that proof against
+  "the actual common response mapper/retry pipeline," which does not yet exist). Building the
+  send-certainty distinction that DOES matter today (`MarketplaceRequestNotSentException`, used by
+  RT-02's proven-not-sent-vs-ambiguous handling) was kept in `Verce.Modules.Commerce`/the workflow,
+  independent of any HTTP transport, specifically so it does not need to be rebuilt when this gate
+  closes. **Decision:** this row is intentionally undecided-by-omission rather than silently
+  resolved by absence, per rule 3 above — G-08's HTTP layer is explicitly deferred until the first
+  real provider adapter (Mercado Livre, TikTok or Shopee — see the entries above) is actually
+  being built, at which point that adapter's own mission must implement G-08 in full against a
+  real `HttpClient`/`HttpMessageHandler` pipeline it can genuinely exercise (real 429/Retry-After/
+  5xx/4xx, real attempt-budget/cancellation, real suppression of real authorization codes) —
+  never retrofitted as an untested layer ahead of having anything real to protect.

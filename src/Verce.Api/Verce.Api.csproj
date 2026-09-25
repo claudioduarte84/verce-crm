@@ -33,6 +33,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Verce.Platform\Verce.Platform.csproj" />
+    <ProjectReference Include="..\Verce.Infrastructure.Marketplaces\Verce.Infrastructure.Marketplaces.csproj" />
     <ProjectReference Include="..\Modules\Verce.Modules.Customers\Verce.Modules.Customers.csproj" />
     <ProjectReference Include="..\Modules\Verce.Modules.Catalog\Verce.Modules.Catalog.csproj" />
     <ProjectReference Include="..\Modules\Verce.Modules.Inventory\Verce.Modules.Inventory.csproj" />

@@ -3379,11 +3379,7 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["MarketplaceAccountWriteRequest"];
-                };
-            };
+            requestBody?: never;
             responses: {
                 /** @description OK */
                 200: {
@@ -3445,6 +3441,120 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-authorizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BeginMarketplaceAuthorizationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-accounts/{id}/reauthorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ReauthorizeMarketplaceAccountRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-authorizations/{providerCode}/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    state: string;
+                    code: string;
+                };
+                header?: never;
+                path: {
+                    providerCode: string;
+                };
                 cookie?: never;
             };
             requestBody?: never;
@@ -3688,6 +3798,193 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/commerce/marketplace-accounts/{id}/disconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ReauthorizeMarketplaceAccountRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-accounts/{id}/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-accounts/{id}/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ReauthorizeMarketplaceAccountRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-authorizations/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-authorizations/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ReauthorizeMarketplaceAccountRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/commerce/marketplace-accounts/{id}/{action}": {
         parameters: {
             query?: never;
@@ -3739,16 +4036,10 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: never;
-                path: {
-                    id: string;
-                };
+                path?: never;
                 cookie?: never;
             };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CapabilityWriteRequest"];
-                };
-            };
+            requestBody?: never;
             responses: {
                 /** @description OK */
                 200: {
@@ -4111,8 +4402,6 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /** @enum {unknown} */
-        AccountCapabilityState: "UNKNOWN" | "GRANTED" | "DENIED";
-        /** @enum {unknown} */
         AccountingTreatment: "OPERATING_EXPENSE" | "INVENTORY_PURCHASE" | "ASSET_ACQUISITION" | null;
         AdditionalDirectCostBreakdown: {
             description: string;
@@ -4164,6 +4453,12 @@ export interface components {
             version: number | string;
         };
         AppSettingValueType: number;
+        BeginMarketplaceAuthorizationRequest: {
+            providerCode: string;
+            /** Format: uuid */
+            salesChannelId: string;
+            displayName: string;
+        };
         BrandActivationRequest: {
             /** Format: uuid */
             versionId: string;
@@ -4224,12 +4519,6 @@ export interface components {
         };
         CancelSaleRequest: {
             reason: string;
-            /** Format: int64 */
-            version: number | string;
-        };
-        CapabilityWriteRequest: {
-            capabilityCode: string;
-            state: components["schemas"]["AccountCapabilityState"];
             /** Format: int64 */
             version: number | string;
         };
@@ -4704,21 +4993,8 @@ export interface components {
         };
         MarketplaceAccountUpdateRequest: {
             displayName: string;
-            credentialReference: null | string;
-            /** Format: uuid */
-            salesChannelId: null | string;
             /** Format: int64 */
             version: number | string;
-        };
-        MarketplaceAccountWriteRequest: {
-            providerCode: string;
-            externalAccountId: string;
-            /** Format: uuid */
-            salesChannelId: string;
-            displayName: string;
-            credentialReference: null | string;
-            /** Format: int64 */
-            version: null | number | string;
         };
         /** @enum {unknown} */
         MarketplaceLinkageState: "UNLINKED" | "NEEDS_REVIEW" | "LINKED" | null;
@@ -5344,6 +5620,10 @@ export interface components {
         QuoteVersionedRequest: {
             /** Format: int64 */
             quoteVersion: number | string;
+        };
+        ReauthorizeMarketplaceAccountRequest: {
+            /** Format: int64 */
+            version: number | string;
         };
         RequeueOutboxMessageRequest: {
             reason: string;

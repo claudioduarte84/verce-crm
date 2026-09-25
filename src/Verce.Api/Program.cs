@@ -19,6 +19,7 @@ using Verce.Api.Pricing;
 using Verce.Api.Quoting;
 using Verce.Api.Settings;
 using Verce.Api.Sales;
+using Verce.Infrastructure.Marketplaces;
 using Verce.Modules.Production;
 using Verce.Modules.Quoting;
 using Verce.Modules.Quoting.Contracts;
@@ -35,6 +36,7 @@ var builder = WebApplication.CreateBuilder(args);
 var allModuleAssemblies = Verce.Api.ModuleAssemblyCatalog.All;
 
 builder.Services.AddVercePlatform(builder.Configuration, builder.Environment, allModuleAssemblies);
+builder.Services.AddVerceMarketplaceInfrastructure(builder.Configuration, builder.Environment);
 var configuredBrandAssetRoot = builder.Configuration["BrandAssets:StorageRoot"];
 if (builder.Environment.IsProduction()
     && (string.IsNullOrWhiteSpace(configuredBrandAssetRoot) || !Path.IsPathRooted(configuredBrandAssetRoot)))
