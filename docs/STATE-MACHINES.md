@@ -765,6 +765,62 @@ the latter is freshness/transport health. S8B manual observations normally remai
 real transitions begin only after S8C.0 and connector implementation. Error text is redacted and
 bounded; no secret-bearing response body is stored.
 
+### 5.10 S8C.2 provider listing reads (architecture frozen)
+
+[ADR-0025](architecture/ADR-0025-s8c2-mercado-livre-listing-read-integration.md) §C–§E.
+
+**Mercado Livre status → observed status (§5.8 vocabulary).** `active`→ACTIVE; `paused`→PAUSED;
+`closed`, `inactive`→INACTIVE; `not_yet_active`, `programmed`→DRAFT; `under_review`,
+`payment_required`, `pending`→ERROR; absent/unknown → **not normalized**: run item
+`PERMANENT_ERROR/LISTING_STATUS_UNMAPPED`, no facts applied, never ACTIVE. Native
+`status[:sub_status,…]` is preserved, bounded.
+
+**Listing sync state (§5.9) under provider reads.** → SYNCED on a FOUND read; → ERROR (facts,
+linkage, history unchanged) on NOT_FOUND, ACCESS_DENIED, SELLER_MISMATCH, TRANSIENT_ERROR or
+PERMANENT_ERROR. Absence from an enumeration never changes a listing; only its direct read does.
+
+**Linkage under provider reads (§5.8).** `SKU-LINK-1` on import-created listings and on UNLINKED
+listings without auto-link suppression, from an ACTIVE explicit SKU mapping only (UNLINKED /
+Product-only LINKED `DETERMINISTIC_SKU` / NEEDS_REVIEW). LINKED and NEEDS_REVIEW listings are never
+re-evaluated; operator unlink suppresses auto-link.
+
+**Observation.** Appended when fingerprint v2 differs from the root's latest; otherwise
+freshness-only. `A → B → A` yields three rows; identical repeats yield none.
+
+**Listing sync run.** No RETRY_WAIT: request retries are the safe-read policy, item retries are new
+FAILED_ONLY runs, crash recovery is reclaim.
+
+```text
+start FULL / retry FAILED_ONLY ──► QUEUED ──claim (new LeaseToken)──► RUNNING ──finish──► SUCCEEDED | PARTIAL | FAILED
+                                                                        │   ▲
+                                                                        └───┘ lease expired: reclaim with a NEW token
+                                                                              (attempt_count < max_attempts)
+RUNNING, lease expired, attempts exhausted ──dispatcher CAS on stale token──► FAILED
+```
+
+| Transition | Guard / effect |
+|---|---|
+| start → QUEUED | commerce:manage + antiforgery; ADR-0025 §G.2 guards; one active run per account (DB unique; 409 with active RunId); audit |
+| retry → QUEUED (new run) | original terminal PARTIAL/FAILED of the same account with ≥ 1 retryable item; copies retryable items as RETRY_TARGET/PENDING; original immutable |
+| QUEUED → RUNNING | claim sets a new `lease_token`, lease 120 s, `attempt_count + 1` |
+| RUNNING → RUNNING (reclaim) | `lease_until < now` and `attempt_count < max_attempts`; new token; the old token can never validate again |
+| every run-owned write | first statement of its transaction: guard `WHERE id AND lease_token AND status='RUNNING'`; 0 rows ⇒ rollback, write nothing |
+| RUNNING → SUCCEEDED | all items FOUND, no stop reason |
+| RUNNING → PARTIAL | ≥ 1 FOUND and ≥ 1 blocking item (or a stop after meaningful work, FULL enumeration complete) |
+| RUNNING → FAILED | start/guard failure; FULL stop before enumeration completed; zero FOUND with blocking items or stop; volume limit |
+| RUNNING → FAILED (exhausted) | lease expired, attempts exhausted; PENDING items → TRANSIENT_ERROR `RUN_ENDED_BEFORE_ITEM_PROCESSED` |
+
+**Run item.** `PENDING → FOUND | NOT_FOUND | ACCESS_DENIED | SELLER_MISMATCH | TRANSIENT_ERROR |
+PERMANENT_ERROR`, once, fenced; terminal outcomes never change. A run finish or stop turns remaining
+PENDING items into TRANSIENT_ERROR. FOUND = successful; every other terminal outcome is blocking;
+NOT_FOUND, ACCESS_DENIED, TRANSIENT_ERROR are retryable by FAILED_ONLY; SELLER_MISMATCH (security) and
+PERMANENT_ERROR are not (only a new FULL run re-reads them). This processing state is distinct from
+the provider listing state.
+
+**SKU mapping.** `(confirm) → ACTIVE → INACTIVE` with reason `OPERATOR_DEACTIVATED` or
+`REPLACED_BY_NEW_MAPPING`; INACTIVE is terminal (a new mapping is confirmed instead). A mapping
+controls future auto-link only; it never unlinks or relinks existing linked listings.
+
 ---
 
 ## 6. Error codes emitted by transitions
@@ -793,6 +849,13 @@ bounded; no secret-bearing response body is stored.
 | `MARKETPLACE_ACCOUNT_CHANNEL_IMMUTABLE` | 409 | Attempted to change an existing account's SalesChannelId |
 | `LISTING_LINKAGE_CONFLICT` | 409 | Link/unlink expected Version or Product/offer consistency failed |
 | `LISTING_LINKAGE_AMBIGUOUS` | 422 | Candidate identity is fuzzy or non-unique and requires operator review |
+| `LISTING_SYNC_ALREADY_ACTIVE` | 409 | The account already has a QUEUED/RUNNING listing sync; the response carries its RunId (S8C.2) |
+| `MARKETPLACE_AUTHORIZATION_NOT_USABLE` | 409 | Account authorization not CONNECTED/confirmed, or a credential operation/provider fence is pending (S8C.2 sync start) |
+| `MARKETPLACE_PROVIDER_NOT_SUPPORTED` | 409 | No listing reader is registered for the provider in this environment (S8C.2) |
+| `LISTING_SYNC_NOTHING_TO_RETRY` | 409 | Retry requested for a run with no retryable item, or a non-terminal/foreign run (S8C.2) |
+| `SKU_MAPPING_CONFLICT` | 409 | An ACTIVE mapping exists for the account SKU and the request did not name it for replacement (S8C.2) |
+| `SKU_MAPPING_PRODUCT_INELIGIBLE` | 422 | The mapped Product does not exist or is inactive (S8C.2) |
+| `SKU_MAPPING_SKU_INVALID` | 422 | The SKU is empty after normalization or exceeds 200 characters (S8C.2) |
 
 Codes are stable strings; the frontend maps them to pt-BR messages. Message text is never
 matched programmatically.

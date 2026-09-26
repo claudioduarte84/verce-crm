@@ -1,29 +1,13 @@
 # ADR-0024 — S8C.1 Marketplace Connector and Authorization Foundation
 
-- **Status:** Candidate — implementation delivered across five 2026-09-25 sessions (foundation;
-  a gap-closing certification pass covering RT-02/RT-03/credential-store/callback-security/audit-
-  security/housekeeping-fairness/production-isolation/frontend/Playwright; an RT-01-extension
-  and deferral-documentation pass; a fourth session, per explicit human direction, that built
-  a separate test-owned E2E host — `tests/Verce.Marketplaces.E2EHost` — reusing Verce.Api's real,
-  unmodified `Program` on a genuine Kestrel server to close the browser-level Playwright
-  marketplace-authorization journeys the third session's OPEN DECISION had left to human review;
-  then a fifth session that closed three non-architectural independent-review findings — real
-  migration certification, a non-hermetic test's own leftover-seed-data assumption, and a
-  Playwright harness defect — without reopening or touching anything the review had already
-  accepted as PASS), pending independent Astra/SOL architecture and implementation regate. This
-  status field records delivery state only; it is not a self-certification. See
-  `docs/ROADMAP.md`'s S8C.1 entry and `docs/S8C1-IMPLEMENTATION-HANDOFF.md`'s five evidence
-  sections for the implementation sessions' own honest scope/gap reports (what was and was not
-  certified), the recorded G-08 HTTP-layer deferral in `docs/ARCHITECTURE-DEBT.md` (still open,
-  deliberately, until a real provider adapter exists), and the fourth session's RESOLVED section
-  (which supersedes and preserves, for the record, the third session's OPEN DECISION proposal on
-  Playwright browser-level testing).
+- **Status:** Accepted — approved and frozen; implemented in `01e5d6a` (S8C.1 COMPLETE).
 - **Date:** 2026-09-24
 - **Sprint:** S8C.1.ARCH
 - **Correction:** consolidated G-01 through G-08 and final recovery RT-01 through RT-03;
   supersedes this candidate's earlier state, callback and fee-extension proposals.
-  Five implementation passes exist (2026-09-25); none has been independently certified
-  against this ADR, and every normative section below remains binding on all five.
+  Five implementation passes exist (2026-09-25); the delivered S8C.1 implementation was
+  independently certified against this ADR and is COMPLETE (see the S8C.1 entry in
+  `docs/ROADMAP.md`). Every normative section below remains binding.
 
 ## Context and delivery boundary
 

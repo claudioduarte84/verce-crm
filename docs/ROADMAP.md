@@ -647,8 +647,9 @@ never refreshed the selected account's `Version` after probing, so the immediate
 attempt would have failed with a spurious concurrency conflict. All three fixed; see the handoff
 doc's RESOLVED section for exact evidence.
 
-Independent Astra/SOL gate review remains required before this is treated as a certified
-implementation.
+Gate status (corrected 2026-09-25 to committed truth): S8C.1 is COMPLETE and committed as
+`01e5d6a` ("feat: add S8C.1 marketplace connector foundation"); ADR-0024 is approved and frozen. The
+historical session notes above are preserved unchanged.
 
 The candidate implementation is foundation plus deterministic fake provider only. It does not
 include real Mercado Livre OAuth/HTTP/account inspection, TikTok or Shopee code, capability seed
@@ -666,9 +667,33 @@ unchanged local fee contract; catalog-only diagnostics and callback-query suppre
 owns live-fee contract evolution.
 Single-instance provider execution is mandatory until distributed fencing is certified.
 
-**Exit:** an implementation now exists (see status note above) but has not been independently
-certified. Exit requires an independent Astra/SOL gate review of the delivered implementation
-against ADR-0024's G-01..G-08 and RT-01..RT-03 before S8C.1 is treated as complete.
+**Exit: MET.** S8C.1 is COMPLETE against ADR-0024's G-01..G-08 and RT-01..RT-03 and committed as
+`01e5d6a`. Three implementation
+defects that only a real rotating-token provider makes reachable (D-01 expiry persistence, D-02
+refresh send-certainty/same-R2 persistence retry, D-03 probe grant provenance/Retry-After) are
+classified as defects under the unchanged ADR-0024 and are fixed first in S8C.2 (ADR-0025 §A.0).
+
+### S8C.2 — Validated Marketplace Listing Reads & Normalized Observations — ARCHITECTURE FROZEN (IMPLEMENTATION NEXT; NOT IMPLEMENTED)
+
+Architecture approved and frozen by the final independent Sol regate on 2026-09-26 in
+[ADR-0025](architecture/ADR-0025-s8c2-mercado-livre-listing-read-integration.md); implementation handoff is
+[S8C2-IMPLEMENTATION-HANDOFF.md](S8C2-IMPLEMENTATION-HANDOFF.md). Scope: first fix S8C.1 defects
+D-01..D-03 and re-run the S8C.1 regression; then the real Mercado Livre (MLB) authorization adapter on
+the unchanged S8C.1 port (no PKCE) with the Astra send-certainty boundary (NOT_SENT only before
+`SendAsync`), the G-08 HTTP layer, a provider-neutral `IMarketplaceListingReader`, lease-fenced
+durable listing-sync runs with durable per-run items (FULL runs; FAILED_ONLY retry runs referencing
+the original), normalized append-only observations (fingerprint v2), explicit operator-confirmed
+SKU mappings as the only auto-link authority, derived listing-sync health, provider-neutral API/UX,
+and an executable live checklist (L-07 needs ≥ 20 test listings; batch 20 is an unvalidated
+application assumption). Only `(MERCADO_LIVRE, LISTINGS_READ)` becomes structurally SUPPORTED. No
+listing writes, stock, orders, Sales, fees, shipping, analytics, ads, webhooks, scheduled provider
+polling, Shopee or TikTok. ML stays non-activatable in Production until a certified production
+credential store exists.
+
+**Next:** deliver the frozen architecture in one implementation mission with all automated gates
+green, reported as `IMPLEMENTED_PENDING_LIVE_PROVIDER_VALIDATION`; S8C.2 is complete only after the
+live gate passes (every Mandatory check of L-01..L-14 PASS, the Conditional L-11 PASS or
+NOT_APPLICABLE with reason, no `LIVE_PROVIDER_CONTRACT_FINDING`) and is independently reviewed.
 
 ### S8C — Provider integrations and operational order ingestion — AFTER S8C.0 GATE
 

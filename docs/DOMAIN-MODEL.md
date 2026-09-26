@@ -924,6 +924,36 @@ while a material `A -> B -> A` sequence remains visible. Retention is
 `commerce.listing_observation_retention_days` (180), always preserving the latest observation,
 current listing and audit/link history.
 
+### S8C.2 listing reads (architecture frozen)
+
+[ADR-0025](architecture/ADR-0025-s8c2-mercado-livre-listing-read-integration.md) adds the
+provider-neutral `IMarketplaceListingReader` port (enumeration page with an opaque in-memory cursor,
+detail batch with normalized facts) resolved through the connector registry; Mercado Livre is the
+only implementation. Provider imports create listings through `MarketplaceListing.ImportFromProvider`
+(SYNCED, one PROVIDER_SYNC observation, no MANUAL `initial:` row) and update them with
+`ApplyProviderFacts`, which replaces observed facts (a removed SKU becomes null) and never touches
+Product, Offer, linkage state/source or mapping reference. Non-FOUND reads set listing sync ERROR
+with a catalog code and keep facts. An unknown provider status is never normalized (no facts
+applied). No quantity is stored.
+
+`MarketplaceAccountSkuMapping` (AR) is the only SKU authority: an operator-confirmed "SKU S of
+account A means Product P", at most one ACTIVE per (account, S), deactivated or replaced explicitly,
+never created from observations or manual links, never deleted. Rule `SKU-LINK-1` applies to a
+listing created by import or an existing UNLINKED listing without `AutoLinkSuppressed`: no ACTIVE
+mapping ⇒ UNLINKED; one mapping with an active Product and at most one variation ⇒ Product-only
+LINKED (`LinkageSource = DETERMINISTIC_SKU`, `SkuMappingId`); anything else ⇒ NEEDS_REVIEW. No Product
+or Offer is created or offer-linked by sync. Operator unlink sets `AutoLinkSuppressed`.
+
+`MarketplaceListingSyncRun` (technical workflow, lease-fenced by `RunId + LeaseToken`) and its
+`MarketplaceListingSyncRunItem` rows are the only sync authority. Items give every external ID a
+durable per-run outcome (`PENDING, FOUND, NOT_FOUND, ACCESS_DENIED, SELLER_MISMATCH, TRANSIENT_ERROR,
+PERMANENT_ERROR`), including IDs with no listing row. Run outcome and counters derive from items:
+SUCCEEDED only when all items are FOUND; PARTIAL when blocking items remain after meaningful work;
+FAILED for systemic/start failures. Retry is a new FAILED_ONLY run referencing the original, whose
+targets the server copies from the original's retryable items. Listing-sync health is derived per
+account from runs; it never uses MarketplaceAccountConnection runtime, and the legacy account sync
+triple is not written. Only `(MERCADO_LIVRE, LISTINGS_READ)` becomes structurally SUPPORTED.
+
 ### ProductCommercialProfile (AR), ProductCommercialImage (*E*) and CommercialTag (AR)
 
 `ProductCommercialProfile` has ordinary unique logical `ProductId`, timestamps and `Version`; it

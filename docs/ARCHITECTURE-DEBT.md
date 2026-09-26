@@ -321,3 +321,29 @@ the product asks for them.
   real `HttpClient`/`HttpMessageHandler` pipeline it can genuinely exercise (real 429/Retry-After/
   5xx/4xx, real attempt-budget/cancellation, real suppression of real authorization codes) —
   never retrofitted as an untested layer ahead of having anything real to protect.
+  **Decision recorded (S8C.2.ARCH, 2026-09-25):** the first real adapter is Mercado Livre; the
+  concrete G-08 design (named `IHttpClientFactory` clients with compile-time base URLs, per-attempt
+  deadlines, `MarketplaceSafeReadExecutor` with the frozen 3-attempt/30 s/250-500 ms+jitter policy,
+  Retry-After as lower bound, token POSTs excluded, ML failure classification, default HTTP logging
+  removed and a safe structured call log) is frozen in
+  [ADR-0025 §F](architecture/ADR-0025-s8c2-mercado-livre-listing-read-integration.md), including the
+  send-certainty boundary reviewed by GPT-6 Astra (S8C2-G01: G01_CLOSED): NOT_SENT only when
+  `SendAsync` was never invoked; anything after invocation without a complete response is
+  SENT_OR_UNKNOWN; the 19-row refresh matrix is normative. The S8C.1 "refresh send-certainty/
+  retry-once matrix undone" gap is classified as implementation defect D-02 under the unchanged
+  ADR-0024 and must be fixed before real ML HTTP is enabled.
+  **Implementation deadline: S8C.2** (proof: handoff D1/D2/D8). Status: decision closed,
+  implementation open.
+
+## S8C.2 architecture — deferred items (2026-09-25)
+
+| ID | Item | Decision deadline | Implementation deadline | Status |
+|---|---|---|---|---|
+| S8C2-00 | **S8C.1 implementation defects D-01..D-03** (expiry not persisted; refresh NOT_SENT/same-R2 persistence retry; probe grant provenance and Retry-After) — defects under the unchanged ADR-0024, fixed first in S8C.2 with the S8C.1 regression re-run. | ADR-0025 §A.0 (frozen) | **S8C.2, before real ML HTTP is enabled** | Open |
+| S8C2-01 | **Mercado Livre live validation gate.** Automated gates cannot prove the live contract; ML has no sandbox (test users run in production). Test-fixture preparation (TP-1..TP-4, PREP-PAUSED-01, PREP-CLOSED-01, outside VERCE) and the classified checklist L-01..L-14 in the [S8C.2 handoff](S8C2-IMPLEMENTATION-HANDOFF.md) must be executed by a human with a dedicated ML test seller holding **≥ 22 prepared listings** (L-07 needs ≥ 20; batch 20 is an application assumption, the official `/items/bulk` maximum is UNKNOWN) and independently reviewed; the gate passes when all Mandatory checks pass and the Conditional L-11 passes or is NOT_APPLICABLE with reason. | S8C.2 (frozen) | **Before S8C.2 is declared complete** | Open — expected delivery status `IMPLEMENTED_PENDING_LIVE_PROVIDER_VALIDATION` |
+| S8C2-02 | **PKCE for marketplace authorization.** Optional for ML and not used in S8C.2; adopting it requires a protected transient-material API in the credential store (ADR-0024 rejected encrypted blobs in Commerce). | **Before real-provider Production activation** | same | Open |
+| S8C2-03 | **Scheduling of listing-observation retention.** `MarketplaceListingObservationRetentionService` exists but is not scheduled; provider sync now creates observations (bounded by material changes). Decide the job/cadence (internal housekeeping, not provider polling). | **Before S8C.3** | S8C.3 | Open |
+| S8C2-04 | **Real-provider Production activation** (restates the S8C.1 row): ML is registered only with the Development local store; `Enabled=true` elsewhere fails startup. | unchanged | unchanged | Open |
+| S8C2-05 | **Freshness without notifications.** S8C.2 is manual-run only; `items` notifications (resource re-fetch, 1 h retries, 2-day `missed_feeds`) need a public listener, 500 ms acknowledgment and signature evidence. | Before any listing freshness/SLA claim | later S8C wave | Open |
+| S8C2-06 | **Provider NOT_FOUND semantics.** No official page defines a per-element 404 as definitive absence, so `NOT_FOUND` is a blocking run-item outcome and a deleted listing keeps its account `ATTENTION_REQUIRED`. Conditional live check L-11 records the observed behavior when the provider omits the closed fixture from enumeration (otherwise it is NOT_APPLICABLE and L-09 records "closed listing still enumerated"); only an evidence-backed ADR correction (or an explicit operator acknowledgement workflow) may reclassify it as resolved-negative. | **Before S8C.3** (after L-11 evidence) | S8C.3 | Open |
+| S8C2-07 | **Legacy generic account sync triple** (`marketplace_account.sync_state`, `last_sync_attempt_at`, `last_successful_sync_at`). S8C.2 derives resource-specific listing-sync health from runs and does not write or display these columns. Decide removal or resource-specific repurposing. | **Before S8C.3** | S8C.3 | Open |

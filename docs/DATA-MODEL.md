@@ -1549,6 +1549,111 @@ PARTIAL coverage while provider sources/ranges remain uncovered. No authoritativ
 UNKNOWN and null metrics, not external zero. COMPLETE marketplace coverage is reserved for later
 effective ORDERS_READ, successful sync and complete interval/source coverage.
 
+### S8C.2 listing-sync persistence — architecture frozen, not migrated
+
+[ADR-0025 §H](architecture/ADR-0025-s8c2-mercado-livre-listing-read-integration.md) is the
+authority for the single future migration `AddS8C2MarketplaceListingSync` (certified fresh,
+S8C.1 → S8C.2 upgrade, down, re-upgrade on disposable PostgreSQL). No migration is created by the
+architecture mission. Provider scroll IDs are never persisted; no cursor lives on
+MarketplaceAccountConnection; no quantity column exists.
+
+#### commerce.marketplace_listing_sync_run — listing-sync workflow (technical)
+
+Owned by the listing-sync workflow, not by MarketplaceAccount (writes never bump the account
+Version). UUID v7 PK, own `version`.
+
+| Column | Type / contract |
+|---|---|
+| id | uuid PK |
+| marketplace_account_id | uuid FK marketplace_account RESTRICT |
+| provider_code | varchar(64) FK marketplace_provider RESTRICT |
+| kind | varchar(16) CHECK `FULL`, `FAILED_ONLY` |
+| status | varchar(16) CHECK `QUEUED`, `RUNNING`, `SUCCEEDED`, `PARTIAL`, `FAILED` |
+| phase | varchar(24) null CHECK `ENUMERATING`, `RECONCILING_MISSING`, `DETAILING` |
+| root_run_id | uuid FK self RESTRICT (FULL: own id) |
+| retry_of_run_id | uuid null FK self RESTRICT (FAILED_ONLY parent) |
+| requested_by_user_id | uuid, logical Platform reference |
+| requested_at / updated_at | timestamptz |
+| started_at / finished_at / heartbeat_at / lease_until | timestamptz null |
+| lease_token | uuid null — new UUID v7 at every claim/reclaim; authority = id + lease_token |
+| attempt_count / max_attempts | int; `0 <= attempt_count <= max_attempts`, `max_attempts` 1..10 (default 3) |
+| enumeration_completed | boolean default false |
+| safe_result_code / provider_error_code | varchar(64) null |
+| last_failure_classification | varchar(32) null |
+| retry_after_until | timestamptz null (diagnostic) |
+| confirmed_operation_id_at_start | uuid null (late-response guard) |
+| version | bigint >= 1 |
+
+Checks: RUNNING iff `lease_token` and `lease_until` non-null; terminal iff `finished_at` and
+`safe_result_code` non-null and `lease_token` null; FULL iff `retry_of_run_id IS NULL AND
+root_run_id = id`; FAILED_ONLY requires `retry_of_run_id` and never `enumeration_completed`; FULL
+SUCCEEDED/PARTIAL requires `enumeration_completed`. Indexes: unique `(marketplace_account_id) WHERE
+status IN ('QUEUED','RUNNING')`; `(status, requested_at) WHERE status IN ('QUEUED','RUNNING')`;
+`(status, lease_until) WHERE status='RUNNING'`; `(marketplace_account_id, kind, requested_at DESC)`;
+`(root_run_id, requested_at)`; `(retry_of_run_id)`. Order by `requested_at`, never id. Runs are never
+deleted. **Every run-owned write** (items, listings, observations, linkage decisions, run
+progress/terminal state, run audit, runtime updates) happens in a transaction whose first statement
+is `UPDATE … SET heartbeat_at, lease_until WHERE id=@runId AND lease_token=@leaseToken AND
+status='RUNNING' RETURNING id`; zero rows ⇒ rollback, nothing written.
+
+#### commerce.marketplace_listing_sync_run_item — durable per-run identity
+
+| Column | Type / contract |
+|---|---|
+| id | uuid PK (v7) |
+| sync_run_id | uuid FK marketplace_listing_sync_run RESTRICT |
+| external_listing_id | varchar(200) |
+| origin | varchar(24) CHECK `ENUMERATED`, `KNOWN_NOT_ENUMERATED`, `RETRY_TARGET` |
+| outcome | varchar(24) CHECK `PENDING`, `FOUND`, `NOT_FOUND`, `ACCESS_DENIED`, `SELLER_MISMATCH`, `TRANSIENT_ERROR`, `PERMANENT_ERROR` |
+| marketplace_listing_id | uuid null FK marketplace_listing RESTRICT (null for IDs with no listing row) |
+| safe_error_code / provider_error_code | varchar(64) null (catalog / allow-listed; no raw text) |
+| attempt_count | int >= 0 |
+| listing_created / observation_appended | boolean default false |
+| created_at / updated_at / completed_at | timestamptz; completed_at null iff PENDING |
+
+Checks: FOUND ⇒ `marketplace_listing_id` non-null, `safe_error_code` null; other terminal outcomes ⇒
+`safe_error_code` non-null. Unique `(sync_run_id, external_listing_id)`; index `(sync_run_id,
+outcome, origin, external_listing_id)`; index `(marketplace_listing_id)`. No payload. Run counters
+are derived from these rows, never from listing rows. Blocking outcomes: every terminal outcome
+except FOUND; retryable by FAILED_ONLY: NOT_FOUND, ACCESS_DENIED, TRANSIENT_ERROR.
+
+#### commerce.marketplace_account_sku_mapping — explicit SKU authority (aggregate root)
+
+| Column | Type / contract |
+|---|---|
+| id | uuid PK (v7) |
+| marketplace_account_id | uuid FK marketplace_account RESTRICT |
+| external_sku | varchar(200), NFC/trim/control-character normalized, ordinal case-sensitive |
+| product_id | uuid, logical Catalog reference (no physical FK) |
+| active | boolean |
+| confirmed_by_user_id / confirmed_at | uuid (logical Platform) / timestamptz |
+| invalidated_at / invalidated_by_user_id | timestamptz null / uuid null |
+| invalidated_reason | varchar(32) null CHECK `OPERATOR_DEACTIVATED`, `REPLACED_BY_NEW_MAPPING` |
+| application metadata / version | created/updated at/by; bigint |
+
+Checks: `active` iff `invalidated_at` and `invalidated_reason` are null. Unique
+`(marketplace_account_id, external_sku) WHERE active`; indexes `(marketplace_account_id, active)`,
+`(product_id)`. Generic audit. Never deleted. Created only by explicit operator confirmation; never
+by observations or manual listing links.
+
+#### marketplace_listing / marketplace_listing_observation / capability deltas
+
+- `marketplace_listing`: `latest_observation_fingerprint char(64) null`; `linkage_source
+  varchar(24) null` CHECK `MANUAL|DETERMINISTIC_SKU` and CHECK `(linkage_state = 'LINKED') =
+  (linkage_source IS NOT NULL)`; `sku_mapping_id uuid null` FK sku_mapping RESTRICT and CHECK
+  `(linkage_source = 'DETERMINISTIC_SKU') = (sku_mapping_id IS NOT NULL)`; `auto_link_suppressed
+  boolean not null default false` (set by operator unlink); `variation_count int null CHECK >= 0`;
+  index `(marketplace_account_id, sync_state)`. Backfill LINKED ⇒ `MANUAL`; latest fingerprint from
+  the greatest `ingested_at` row, null on a tie with different fingerprints (never UUID order).
+  `listing_url`, `provider_observed_at`, `sync_error` (catalog codes) are written by sync.
+- `marketplace_listing_observation`: `provider_observed_at` nullable (unknown provider time is never
+  "now"); `variation_count int null CHECK >= 0`. Provider `observation_key` =
+  `ps:{runId:N}:{fingerprint}`; fingerprint v2 per ADR-0025 §I.
+- `marketplace_provider_capability`: migration upserts `(MERCADO_LIVRE, LISTINGS_READ)` to
+  `SUPPORTED/DISCOVERY/verified_at 2026-09-24`; all others unchanged (`UNKNOWN`).
+- `marketplace_account.sync_state/last_sync_attempt_at/last_successful_sync_at`: not written by
+  S8C.2; listing-sync health is derived from runs (ADR-0025 §E.8).
+
 ### Tables deliberately absent in S8B
 
 There is no `commercial_catalog`, `published_item`, `publication_request`, `marketplace_order`,
