@@ -26,7 +26,10 @@ var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Ve
 var urls = ParseUrls(args) ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
     ?? throw new InvalidOperationException("VERCE_E2E_HOST_URLS_REQUIRED: pass --urls <url> or set ASPNETCORE_URLS.");
 
+const string MercadoLivreFrontendOrigin = "https://localhost:4173";
+
 using var harness = new MarketplaceTestHarness();
+var mercadoLivreFake = new FakeMercadoLivreHttpHandler();
 
 // Restores genuine production/dotnet-run scheduling and seeding defaults — VerceWebApplicationFactory
 // defaults these OFF because most in-process xunit tests need to control timing deterministically
@@ -38,6 +41,17 @@ var extraConfiguration = new Dictionary<string, string?>(harness.ExtraConfigurat
     ["Outbox:SchedulingEnabled"] = "true",
     ["Quoting:Expiration:SchedulingEnabled"] = "true",
     ["Settings:SeedOnStartup"] = "true",
+
+    // S8C.2 D11: the REAL Mercado Livre adapter is enabled in this test-owned host only (Development + the certified local credential store, ADR-0025 §A.1).
+    // Its two named HTTP clients are given the in-process fake transport below, so no socket ever reaches the provider. The browser reaches /api through the
+    // frontend origin (vite preview proxy), so that origin is the ONE authoritative public origin and the registered redirect agrees with it (A-09).
+    ["Verce:PublicOrigin"] = MercadoLivreFrontendOrigin,
+    ["Marketplaces:MercadoLivre:Enabled"] = "true",
+    ["Marketplaces:MercadoLivre:ClientId"] = "900000001",
+    ["Marketplaces:MercadoLivre:ClientSecret"] = "e2e-only-secret",
+    ["Marketplaces:MercadoLivre:RedirectUri"] = MercadoLivreFrontendOrigin + "/api/commerce/marketplace-authorizations/MERCADO_LIVRE/callback",
+    // The dispatcher's recurring trigger is a safety net (a run is also dispatched the moment it is committed); the minimum keeps recovery quick.
+    ["Marketplaces:ListingSync:DispatchIntervalSeconds"] = "10",
 };
 
 // The store-loss Playwright journey performs harness-side filesystem fault injection (deleting
@@ -55,6 +69,11 @@ await using var factory = new VerceWebApplicationFactory(
     configureTestServices: services =>
     {
         harness.ConfigureServices(services);
+        // Registered after Verce.Api's own AddVerceMercadoLivre: the later ConfigurePrimaryHttpMessageHandler wins, so ONLY these two named clients change transport.
+        services.AddSingleton(mercadoLivreFake);
+        services.AddHttpClient("MercadoLivre.OAuth").ConfigurePrimaryHttpMessageHandler(() => mercadoLivreFake);
+        services.AddHttpClient("MercadoLivre.Api").ConfigurePrimaryHttpMessageHandler(() => mercadoLivreFake);
+        services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(new MercadoLivreE2EControlEndpointsStartupFilter(mercadoLivreFake));
         services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(
             sp => new MarketplaceE2EControlEndpointsStartupFilter(sp.GetRequiredService<FakeMarketplaceControlPlane>()));
     },
@@ -67,6 +86,20 @@ await using var factory = new VerceWebApplicationFactory(
 // already finished seeding the real MERCADO_LIVRE/SHOPEE/TIKTOK_SHOP provider catalog rows by the
 // time control returns here).
 _ = factory.Server;
+
+// S8C.2 D11: in real-Kestrel mode VerceWebApplicationFactory builds a throwaway TestServer host AND the real host the browser reaches; factory.Services is the
+// throwaway one. Quartz's hosted service did not start the scheduler of the real host in this arrangement (observed: jobs and triggers persisted, qrtz_scheduler_state
+// empty, nothing ever fired, so an accepted listing-sync run stayed QUEUED), while Verce.Api's own host is unaffected. Starting the REAL host's scheduler here is this
+// test host's own bootstrap: idempotent if the hosted service starts it too, and it adds no job, trigger or schedule: the dispatcher that claims runs is the real
+// MarketplaceListingSyncDispatchJob registered by Verce.Api's composition, running in the real host's container (the only one holding the credential store).
+var realServices = factory.RealHostServices ?? throw new InvalidOperationException("VERCE_E2E_REAL_HOST_SERVICES_REQUIRED");
+var schedulerFactory = realServices.GetService<Quartz.ISchedulerFactory>();
+if (schedulerFactory is not null)
+{
+    var scheduler = await schedulerFactory.GetScheduler();
+    if (!scheduler.IsStarted) await scheduler.Start();
+    Console.WriteLine("VERCE_E2E_QUARTZ_STARTED " + scheduler.IsStarted + " hostedServices(real)=" + realServices.GetServices<Microsoft.Extensions.Hosting.IHostedService>().Count());
+}
 
 // ADR-0024 G-06: "Test host registers it through the real registry/ports and inserts test-only
 // FAKE provider/capability fixtures into its disposable PostgreSQL. Normal seed has no FAKE row."

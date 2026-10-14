@@ -1644,7 +1644,13 @@ by observations or manual listing links.
   `(linkage_source = 'DETERMINISTIC_SKU') = (sku_mapping_id IS NOT NULL)`; `auto_link_suppressed
   boolean not null default false` (set by operator unlink); `variation_count int null CHECK >= 0`;
   index `(marketplace_account_id, sync_state)`. Backfill LINKED ⇒ `MANUAL`; latest fingerprint from
-  the greatest `ingested_at` row, null on a tie with different fingerprints (never UUID order).
+  the greatest `ingested_at` row, null on a tie with different fingerprints (never UUID order) and null
+  when that fingerprint is not exactly 64 characters (legacy S8B client-supplied fingerprints are
+  `varchar(128)`; a non-V2-shaped value can never equal a future fingerprint and must not abort the
+  migration with `22001` — M059 correction; the first sync then appends one observation). The same
+  rule governs the runtime marker: a manual observation (S8B contract, fingerprint 1..128) keeps its
+  full value on the observation row, only a 64-character value becomes the listing's latest marker,
+  and a longer one is deduplicated against the last loaded observation as in S8B (M060 correction).
   `listing_url`, `provider_observed_at`, `sync_error` (catalog codes) are written by sync.
 - `marketplace_listing_observation`: `provider_observed_at` nullable (unknown provider time is never
   "now"); `variation_count int null CHECK >= 0`. Provider `observation_key` =

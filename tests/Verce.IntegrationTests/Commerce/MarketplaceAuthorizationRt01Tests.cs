@@ -160,7 +160,7 @@ public sealed class MarketplaceAuthorizationRt01Tests : IAsyncLifetime
         using (var scope = _factory.Services.CreateScope())
         {
             var workflow = scope.ServiceProvider.GetRequiredService<MarketplaceAuthorizationWorkflow>();
-            await workflow.ResolvePendingAsync(operationId, CancellationToken.None);
+            await workflow.ResolvePendingAsync(operationId, cancellationToken: CancellationToken.None);
         }
 
         _harness.ControlPlane.Release(sessionId);
@@ -238,7 +238,7 @@ public sealed class MarketplaceAuthorizationRt01Tests : IAsyncLifetime
         {
             using var scope = _factory.Services.CreateScope();
             var workflow = scope.ServiceProvider.GetRequiredService<MarketplaceAuthorizationWorkflow>();
-            await workflow.ResolvePendingAsync(operationId, CancellationToken.None);
+            await workflow.ResolvePendingAsync(operationId, cancellationToken: CancellationToken.None);
         });
 
         // The resolver must genuinely be blocked by PostgreSQL's own row lock — not merely slow.
@@ -288,7 +288,7 @@ public sealed class MarketplaceAuthorizationRt01Tests : IAsyncLifetime
             {
                 using var scope = _factory.Services.CreateScope();
                 var workflow = scope.ServiceProvider.GetRequiredService<MarketplaceAuthorizationWorkflow>();
-                await workflow.ResolvePendingAsync(operationId, CancellationToken.None);
+                await workflow.ResolvePendingAsync(operationId, cancellationToken: CancellationToken.None);
             });
             (await Task.WhenAny(resolverTask, Task.Delay(400)) == resolverTask).Should().BeFalse("the resolver must block while the row lock is held");
 
@@ -369,7 +369,7 @@ public sealed class MarketplaceAuthorizationRt01Tests : IAsyncLifetime
         using (var scope = _factory.Services.CreateScope())
         {
             var workflow = scope.ServiceProvider.GetRequiredService<MarketplaceAuthorizationWorkflow>();
-            await workflow.ResolvePendingAsync(operationId, CancellationToken.None);
+            await workflow.ResolvePendingAsync(operationId, cancellationToken: CancellationToken.None);
         }
 
         await using var verify = _fixture.CreateContext();
@@ -406,7 +406,7 @@ public sealed class MarketplaceAuthorizationRt01Tests : IAsyncLifetime
         using (var scope = _factory.Services.CreateScope())
         {
             var workflow = scope.ServiceProvider.GetRequiredService<MarketplaceAuthorizationWorkflow>();
-            await workflow.ResolvePendingAsync(operationId, CancellationToken.None);
+            await workflow.ResolvePendingAsync(operationId, cancellationToken: CancellationToken.None);
         }
 
         await using var verify = _fixture.CreateContext();

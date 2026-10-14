@@ -6,6 +6,10 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Verce.Infrastructure.Marketplaces.MercadoLivre;
 using Verce.Modules.Commerce;
 
 namespace Verce.Infrastructure.Marketplaces;
@@ -28,6 +32,22 @@ public static class MarketplaceInfrastructureServiceCollectionExtensions
         // The test host explicitly opts in by setting an external root in Development.
         services.AddSingleton<ProviderExecutionGate>();
         services.AddScoped<MarketplaceAuthorizationWorkflow>();
+        // A-05: registered unconditionally (like the workflow itself) — Probe always routes through
+        // it regardless of whether a real provider is enabled; IOptions<MercadoLivreOptions> still
+        // resolves to safe defaults (margin 300s) even when nothing ever binds that section.
+        services.AddScoped<MarketplaceCredentialExecutor>();
+        services.AddScoped<MarketplaceListingSyncExecution>();
+        services.AddScoped<MarketplaceListingSyncService>();
+        // Handoff B5/B6: the dispatch trigger, executor host, dispatcher and per-provider in-flight limiter are always resolvable; only the Quartz
+        // job/trigger is conditional (SchedulingEnabled, ML-enabled local-store composition below).
+        services.AddSingleton<MarketplaceProviderInFlightLimiter>();
+        services.AddSingleton<MarketplaceListingSyncDispatchTrigger>();
+        services.AddSingleton<MarketplaceListingSyncExecutor>();
+        services.AddHostedService(sp => sp.GetRequiredService<MarketplaceListingSyncExecutor>());
+        services.AddScoped<MarketplaceListingSyncDispatcher>();
+        services.AddOptions<MarketplaceListingSyncOptions>().Bind(configuration.GetSection(MarketplaceListingSyncOptions.SectionName)).ValidateOnStart();
+        services.AddSingleton<IValidateOptions<MarketplaceListingSyncOptions>, MarketplaceListingSyncOptionsValidator>();
+        var mercadoLivreEnabled = configuration.GetValue<bool>($"{MercadoLivreOptions.SectionName}:Enabled");
         if (environment.IsDevelopment() && !string.IsNullOrWhiteSpace(options.CredentialStoreRoot))
         {
             services.AddSingleton<IProtectedCredentialStore, LocalProtectedCredentialStore>();
@@ -35,6 +55,7 @@ public static class MarketplaceInfrastructureServiceCollectionExtensions
             // G-06: housekeeping/startup-recovery only exist where a local store/registry are
             // actually active. Production registers neither, so there is nothing to reconcile.
             services.AddVerceMarketplaceHousekeeping(configuration);
+            if (mercadoLivreEnabled) services.AddVerceMercadoLivre(configuration);
         }
         else
         {
@@ -48,9 +69,49 @@ public static class MarketplaceInfrastructureServiceCollectionExtensions
                     "MARKETPLACE_TEST_ONLY_CONNECTOR_IN_NON_DEVELOPMENT_COMPOSITION: a test-only IMarketplaceAuthorizationConnector " +
                     "registration was found while composing a non-Development/no-local-store host. This is never valid outside an " +
                     "isolated test harness.");
+            // ADR-0025 §A.1: "Enabled = true in any other composition fails startup" — a real
+            // provider requires the certified local store branch above; Production has none.
+            if (mercadoLivreEnabled)
+                throw new InvalidOperationException("MARKETPLACE_REAL_PROVIDER_REQUIRES_CERTIFIED_STORE");
             services.AddSingleton<IProtectedCredentialStore, UnsupportedProtectedCredentialStore>();
             services.AddSingleton<IMarketplaceConnectorRegistry, MarketplaceConnectorRegistry>();
         }
+        return services;
+    }
+
+    /// <summary>
+    /// ADR-0025 §A6/F.4: named OAuth/API clients, the send-certainty sender, the safe-read
+    /// executor and the single MercadoLivreConnector instance (registered for BOTH Commerce
+    /// ports). Only reachable from the certified local-store Development branch above.
+    /// </summary>
+    public static IServiceCollection AddVerceMercadoLivre(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddOptions<MercadoLivreOptions>().Bind(configuration.GetSection(MercadoLivreOptions.SectionName)).ValidateOnStart();
+        services.AddSingleton<IValidateOptions<MercadoLivreOptions>, MercadoLivreOptionsValidator>();
+        services.AddSingleton<IMarketplaceDelay, SystemMarketplaceDelay>();
+        services.AddSingleton<IMarketplaceJitter, SystemMarketplaceJitter>();
+        services.AddSingleton<MarketplaceHttpSender>();
+        services.AddSingleton<MarketplaceSafeReadExecutor>();
+
+        services.AddHttpClient("MercadoLivre.OAuth", client =>
+        {
+            client.BaseAddress = new Uri("https://api.mercadolibre.com/");
+            client.Timeout = System.Threading.Timeout.InfiniteTimeSpan;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Verce3D/1.0");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false })
+          .RemoveAllLoggers();
+        services.AddHttpClient("MercadoLivre.Api", client =>
+        {
+            client.BaseAddress = new Uri("https://api.mercadolibre.com/");
+            client.Timeout = System.Threading.Timeout.InfiniteTimeSpan;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Verce3D/1.0");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false })
+          .RemoveAllLoggers();
+
+        services.AddSingleton<MercadoLivreConnector>();
+        services.AddSingleton<IMarketplaceAuthorizationConnector>(sp => sp.GetRequiredService<MercadoLivreConnector>());
+        services.AddSingleton<IMarketplaceListingReader>(sp => sp.GetRequiredService<MercadoLivreConnector>());
+        services.AddVerceMarketplaceListingSyncScheduling(configuration);
         return services;
     }
 }
@@ -69,8 +130,9 @@ internal sealed class UnsupportedProtectedCredentialStore : IProtectedCredential
 public sealed class MarketplaceConnectorRegistry : IMarketplaceConnectorRegistry
 {
     private readonly IReadOnlyDictionary<string, IMarketplaceAuthorizationConnector> _connectors;
+    private readonly IReadOnlyDictionary<string, IMarketplaceListingReader> _listingReaders;
 
-    public MarketplaceConnectorRegistry(IEnumerable<IMarketplaceAuthorizationConnector> connectors)
+    public MarketplaceConnectorRegistry(IEnumerable<IMarketplaceAuthorizationConnector> connectors, IEnumerable<IMarketplaceListingReader>? listingReaders = null)
     {
         var dictionary = new Dictionary<string, IMarketplaceAuthorizationConnector>(StringComparer.OrdinalIgnoreCase);
         foreach (var connector in connectors)
@@ -79,10 +141,23 @@ public sealed class MarketplaceConnectorRegistry : IMarketplaceConnectorRegistry
                 throw new InvalidOperationException($"Duplicate marketplace connector registration: {connector.ProviderCode}.");
         }
         _connectors = dictionary;
+
+        var readers = new Dictionary<string, IMarketplaceListingReader>(StringComparer.OrdinalIgnoreCase);
+        foreach (var reader in listingReaders ?? [])
+        {
+            if (!dictionary.ContainsKey(reader.ProviderCode))
+                throw new InvalidOperationException($"MARKETPLACE_LISTING_READER_WITHOUT_CONNECTOR: {reader.ProviderCode} registers a listing reader with no same-code authorization connector.");
+            if (!readers.TryAdd(reader.ProviderCode, reader))
+                throw new InvalidOperationException($"Duplicate marketplace listing reader registration: {reader.ProviderCode}.");
+        }
+        _listingReaders = readers;
     }
 
     public bool TryGet(string providerCode, out IMarketplaceAuthorizationConnector connector) =>
         _connectors.TryGetValue(providerCode, out connector!);
+
+    public bool TryGetListingReader(string providerCode, out IMarketplaceListingReader reader) =>
+        _listingReaders.TryGetValue(providerCode, out reader!);
 }
 
 /// <summary>Development/test-only encrypted local store. Business orchestration never reads by client-supplied reference.</summary>

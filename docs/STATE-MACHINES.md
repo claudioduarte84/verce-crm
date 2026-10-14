@@ -819,7 +819,9 @@ the provider listing state.
 
 **SKU mapping.** `(confirm) → ACTIVE → INACTIVE` with reason `OPERATOR_DEACTIVATED` or
 `REPLACED_BY_NEW_MAPPING`; INACTIVE is terminal (a new mapping is confirmed instead). A mapping
-controls future auto-link only; it never unlinks or relinks existing linked listings.
+controls future auto-link only; it never unlinks or relinks existing linked listings. Deactivating
+an already INACTIVE mapping with its current version is a 204 no-op; a stale version is 409
+`CONCURRENCY_CONFLICT` ([ADR-0028](architecture/ADR-0028-s8c2-sku-mapping-deactivation-replay.md)).
 
 ---
 

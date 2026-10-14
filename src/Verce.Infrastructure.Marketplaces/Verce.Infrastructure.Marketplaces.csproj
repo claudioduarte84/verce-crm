@@ -5,4 +5,11 @@
     <ProjectReference Include="..\Modules\Verce.Modules.Pricing\Verce.Modules.Pricing.csproj" />
     <ProjectReference Include="..\Verce.Platform\Verce.Platform.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- A-10: exposes ONLY the narrow, explicitly-documented test-only seams (e.g.
+         MercadoLivreConnector.TestOnlyRequestMaterializationFault) — never a general escape hatch;
+         every such member is `internal`, always null/inert in production, and named
+         "TestOnly*" so its purpose is unambiguous at every call site. -->
+    <InternalsVisibleTo Include="Verce.IntegrationTests" />
+  </ItemGroup>
 </Project>

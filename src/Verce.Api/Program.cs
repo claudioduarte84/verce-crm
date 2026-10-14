@@ -67,6 +67,8 @@ builder.Services.AddScoped<Verce.Modules.Settings.AppSettingValueReader>();
 builder.Services.AddScoped<Verce.Modules.Settings.BrandAssetStorage>();
 builder.Services.AddScoped<MarketplaceListingObservationRetentionService>();
 builder.Services.AddScoped<Verce.Modules.Commerce.IChannelFeeProvider, LocalFeeRuleProvider>();
+builder.Services.AddScoped<Verce.Modules.Commerce.ICommerceProductEligibilityReader, CommerceProductEligibilityReader>();
+builder.Services.AddScoped<Verce.Modules.Commerce.MarketplaceSkuMappingService>();
 
 // ---- S7: Quote PDF V1 (ADR-0016) — content-addressed generated-document storage, mirroring
 // BrandAssets:StorageRoot's exact production-hardening shape one directory over. ----

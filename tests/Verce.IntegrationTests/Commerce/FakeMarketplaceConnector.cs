@@ -17,7 +17,38 @@ public sealed record FakeMarketplaceScenario(
     string ExternalAccountId,
     IReadOnlyDictionary<string, AccountCapabilityState>? Grants = null,
     FakeMarketplaceOutcome Outcome = FakeMarketplaceOutcome.Success,
-    CredentialImpact Impact = CredentialImpact.MAY_SUPERSEDE_EXISTING);
+    CredentialImpact Impact = CredentialImpact.MAY_SUPERSEDE_EXISTING,
+    // D-01: lets a test assert that the initial-connect/reconnect path persists the provider's
+    // declared access-token expiry; null means "use the connector's own 6h default".
+    DateTimeOffset? AccessExpiresAt = null);
+
+/// <summary>
+/// D-02 test surface: deterministic, keyed-by-account (never by session — refresh has no
+/// authorization session) control of what <see cref="FakeMarketplaceConnector.RefreshAsync"/>
+/// does, so the ADR-0025 §F.2/§F.3 send-certainty matrix can be driven without any real HTTP.
+/// </summary>
+public enum FakeRefreshOutcome
+{
+    Success,
+    /// <summary>Proven NOT_SENT, routine pre-send guard (e.g. local validation) — CONNECTED must
+    /// be preserved, only runtime moves to UNAVAILABLE.</summary>
+    NotSentPreSendGuard,
+    /// <summary>Proven NOT_SENT because the material has no usable refresh token — authorization
+    /// is unrenewable even though nothing was sent (REAUTHORIZATION_REQUIRED).</summary>
+    NotSentTokenUnavailable,
+    /// <summary>A complete provider response (or a certainly-sent failure) mapped to a normalized
+    /// <see cref="MarketplaceProviderFailure"/> — always SENT_OR_UNKNOWN/SENT_AND_RESPONSE_RECEIVED,
+    /// never replayed.</summary>
+    ProviderFailure,
+    /// <summary>An arbitrary untyped exception (timeout/connection-reset/etc. shaped) — must be
+    /// treated exactly like any other SENT_OR_UNKNOWN failure, never inferred as NOT_SENT.</summary>
+    GenericSentOrUnknownException,
+}
+
+public sealed record FakeRefreshScenario(
+    FakeRefreshOutcome Outcome = FakeRefreshOutcome.Success,
+    MarketplaceProviderFailure? Failure = null,
+    DateTimeOffset? AccessExpiresAt = null);
 
 /// <summary>
 /// Deterministic, in-memory, barrier-friendly control surface a test configures BEFORE it drives
@@ -32,8 +63,21 @@ public sealed class FakeMarketplaceControlPlane
     private readonly ConcurrentDictionary<Guid, (string ExternalAccountId, IReadOnlyDictionary<string, AccountCapabilityState> Grants)> _accountIdentities = new();
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource> _barriers = new();
     private readonly ConcurrentDictionary<Guid, int> _completeOnceCallCounts = new();
+    private readonly ConcurrentDictionary<Guid, FakeRefreshScenario> _refreshScenarios = new();
+    private readonly ConcurrentDictionary<Guid, int> _refreshCallCounts = new();
 
     public void Configure(Guid sessionId, FakeMarketplaceScenario scenario) => _sessionScenarios[sessionId] = scenario;
+
+    /// <summary>D-02: configures the NEXT <see cref="FakeMarketplaceConnector.RefreshAsync"/> call
+    /// for this account. Keyed by account (not session): refresh has no authorization session.
+    /// Absent configuration means "succeed" (existing default behavior).</summary>
+    public void ConfigureRefresh(Guid accountId, FakeRefreshScenario scenario) => _refreshScenarios[accountId] = scenario;
+    public FakeRefreshScenario? ResolveRefresh(Guid accountId) => _refreshScenarios.TryGetValue(accountId, out var scenario) ? scenario : null;
+
+    /// <summary>D-02: proves "never a second POST" / "old R1 never replayed" — asserts exactly how
+    /// many times the connector's own RefreshAsync was actually invoked for this account.</summary>
+    public int RefreshCallCount(Guid accountId) => _refreshCallCounts.GetValueOrDefault(accountId);
+    internal void RecordRefreshCall(Guid accountId) => _refreshCallCounts.AddOrUpdate(accountId, 1, (_, count) => count + 1);
 
     /// <summary>Callback security: "for duplicate/replayed callback, provider exchange call count
     /// must be &lt;= 1." Incremented once per genuine <see cref="FakeMarketplaceConnector.CompleteOnceAsync"/>
@@ -104,14 +148,34 @@ public sealed class FakeMarketplaceConnector : IMarketplaceAuthorizationConnecto
 
         var token = _control.IssueToken(scenario.ExternalAccountId);
         var grants = scenario.Grants ?? new Dictionary<string, AccountCapabilityState>();
-        return new MarketplaceAuthorizationCompletion(scenario.ExternalAccountId, grants, Encoding.UTF8.GetBytes(token), scenario.Impact);
+        // D-01: always carries a real (non-null) expiry unless the test explicitly overrides it, so
+        // a missing persistence write is provably distinguishable from "the connector never supplied one".
+        return new MarketplaceAuthorizationCompletion(scenario.ExternalAccountId, grants, Encoding.UTF8.GetBytes(token), scenario.Impact, scenario.AccessExpiresAt ?? DateTimeOffset.UtcNow.AddHours(6));
     }
 
+    /// <summary>D-02: the only place S8C.1's own test suite can drive the ADR-0025 §F.2/§F.3
+    /// send-certainty matrix without a real HTTP adapter. Configured per-account via
+    /// <see cref="FakeMarketplaceControlPlane.ConfigureRefresh"/>; absent configuration keeps the
+    /// pre-existing always-succeeds behavior so every other test is unaffected.</summary>
     public Task<MarketplaceRefreshCompletion> RefreshAsync(MarketplaceRefreshRequest request, CancellationToken cancellationToken)
     {
+        _control.RecordRefreshCall(request.AccountId);
+        var scenario = _control.ResolveRefresh(request.AccountId);
+        switch (scenario?.Outcome)
+        {
+            case FakeRefreshOutcome.NotSentPreSendGuard:
+                throw new MarketplaceRequestNotSentException("FAKE_REFRESH_NOT_SENT");
+            case FakeRefreshOutcome.NotSentTokenUnavailable:
+                throw new MarketplaceRequestNotSentException("REFRESH_TOKEN_UNAVAILABLE");
+            case FakeRefreshOutcome.ProviderFailure:
+                throw new MarketplaceProviderCallException(scenario.Failure
+                    ?? new MarketplaceProviderFailure(MarketplaceFailureClassification.UNKNOWN, "REFRESH_OUTCOME_UNKNOWN", MarketplaceSendCertainty.SENT_OR_UNKNOWN));
+            case FakeRefreshOutcome.GenericSentOrUnknownException:
+                throw new InvalidOperationException("FAKE_MARKETPLACE_REFRESH_AMBIGUOUS_AFTER_SEND");
+        }
         var identity = _control.IdentityFor(request.AccountId)?.ExternalAccountId ?? "FAKE-UNKNOWN";
         var token = _control.IssueToken(identity);
-        return Task.FromResult(new MarketplaceRefreshCompletion(Encoding.UTF8.GetBytes(token), DateTimeOffset.UtcNow.AddHours(6)));
+        return Task.FromResult(new MarketplaceRefreshCompletion(Encoding.UTF8.GetBytes(token), scenario?.AccessExpiresAt ?? DateTimeOffset.UtcNow.AddHours(6)));
     }
 
     public Task<MarketplaceAccountInspection> InspectAsync(MarketplaceAccountInspectionRequest request, CancellationToken cancellationToken)

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
@@ -27,14 +28,24 @@ public sealed class MarketplaceAuthorizationWorkflow
     private readonly IProtectedCredentialStore _store;
     private readonly ProviderExecutionGate _gate;
     private readonly IClock _clock;
+    private readonly MarketplaceCredentialExecutor _credentialExecutor;
+    private readonly Func<TimeSpan, CancellationTokenSource> _cleanupBudgetFactory;
 
     // G-03: "a keyed async single-flight by immutable account ID is shared by refresh, reconnect
     // installation, generation replacement and disconnect". This process-wide dictionary is that
     // single-flight; it is intentionally process-local (S8C.1 assumes one application instance).
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> AccountLocks = new();
 
-    public MarketplaceAuthorizationWorkflow(IUnitOfWork uow, IMarketplaceConnectorRegistry registry, IProtectedCredentialStore store, ProviderExecutionGate gate, IClock clock)
-    { _uow = uow; _registry = registry; _store = store; _gate = gate; _clock = clock; }
+    /// <summary>A-01: every terminalization/cleanup budget below is created through this ONE seam
+    /// instead of calling <c>new CancellationTokenSource(...)</c> inline — production behavior is
+    /// byte-for-byte identical (the default factory below), but a test can substitute a recording
+    /// factory to prove WHEN each fresh budget is actually constructed (e.g. strictly after an
+    /// external provider flight completes, never hoisted to flight-start) without needing a broad
+    /// new time-abstraction or any production DI change: this parameter defaults to null for every
+    /// existing caller (DI-resolved or otherwise) and only a test that constructs this class
+    /// directly ever supplies a different one.</summary>
+    public MarketplaceAuthorizationWorkflow(IUnitOfWork uow, IMarketplaceConnectorRegistry registry, IProtectedCredentialStore store, ProviderExecutionGate gate, IClock clock, MarketplaceCredentialExecutor credentialExecutor, Func<TimeSpan, CancellationTokenSource>? cleanupBudgetFactory = null)
+    { _uow = uow; _registry = registry; _store = store; _gate = gate; _clock = clock; _credentialExecutor = credentialExecutor; _cleanupBudgetFactory = cleanupBudgetFactory ?? (budget => new CancellationTokenSource(budget)); }
 
     public async Task<BegunMarketplaceAuthorization> BeginAsync(BeginMarketplaceAuthorization input, CancellationToken cancellationToken)
     {
@@ -84,8 +95,20 @@ public sealed class MarketplaceAuthorizationWorkflow
     /// the account lock, and a durable REFRESH operation row is committed and advanced to
     /// EXTERNAL_IN_FLIGHT before any refresh call can be sent. A waiter that queues behind the
     /// lock reloads current state instead of blindly refreshing again.
+    ///
+    /// D-02 (ADR-0025 §F.2/§F.3, Astra G01): send certainty is never inferred from an exception
+    /// subtype. <see cref="MarketplaceRequestNotSentException"/> is the ONLY proof the provider
+    /// call never went out; its safe-code message distinguishes a routine pre-send guard (preserve
+    /// CONNECTED, mark UNAVAILABLE only, no replay) from unrenewable material
+    /// (REFRESH_TOKEN_UNAVAILABLE — REAUTHORIZATION_REQUIRED, nothing was ever sent to lose). Every
+    /// other exception, of any type, is SENT_OR_UNKNOWN and is never replayed: a
+    /// <see cref="MarketplaceProviderCallException"/> maps through its own safe code, anything else
+    /// becomes REFRESH_OUTCOME_UNKNOWN. Once the connector call begins, all terminalization uses a
+    /// bounded cleanup token independent of the caller's, so caller cancellation can never turn a
+    /// real attempt back into NOT_SENT; if that bounded window itself cannot commit a terminal
+    /// decision, the operation is deliberately left PENDING for the operation-row arbiter/housekeeping.
     /// </summary>
-    public async Task<MarketplaceWorkflowResult> RefreshAsync(Guid accountId, CancellationToken cancellationToken)
+    public async Task<MarketplaceWorkflowResult> RefreshAsync(Guid accountId, bool force = false, Guid? rejectedConfirmedOperationId = null, CancellationToken cancellationToken = default)
     {
         var providerCode = await _uow.ExecuteAsync(async (db, ct) =>
             (await db.Set<MarketplaceAccount>().AsNoTracking().SingleOrDefaultAsync(x => x.Id == accountId, ct))?.ProviderCode, cancellationToken)
@@ -95,6 +118,12 @@ public sealed class MarketplaceAuthorizationWorkflow
         await using var providerLease = await _gate.EnterSharedAsync(providerCode, cancellationToken);
         var accountLock = AccountLocks.GetOrAdd(accountId, _ => new SemaphoreSlim(1, 1));
         await accountLock.WaitAsync(cancellationToken);
+        // A-02: R1 (the previous confirmed secret, read below) and R2 (the provider's replacement,
+        // received after the call) are both copied into buffers this method owns exclusively, so
+        // they can be positively zeroed on EVERY exit path — success, CAS-fail-then-success,
+        // persistent CAS failure, exception, cancellation, terminal fail-closed — never only some.
+        byte[]? r1Buffer = null;
+        byte[]? r2Buffer = null;
         try
         {
             var now = _clock.UtcNow;
@@ -104,8 +133,12 @@ public sealed class MarketplaceAuthorizationWorkflow
                 var account = await db.Set<MarketplaceAccount>().Include(x => x.Connection).SingleAsync(x => x.Id == accountId, ct);
                 if (account.Connection.AuthorizationState != MarketplaceAuthorizationState.CONNECTED || account.CredentialReference is null || account.Connection.ConfirmedCredentialVersion is not { } confirmedVersion || account.Connection.ConfirmedOperationId is not { } confirmedOperationId)
                     return; // not usable: nothing to refresh, waiters simply see current state
-                // Waiters that queued behind the lock re-evaluate expiry here instead of refreshing again.
-                if (account.Connection.AccessExpiresAt is { } expiresAt && expiresAt > now) return;
+                // Waiters that queued behind the lock re-evaluate expiry here instead of refreshing
+                // again. `force` (after an observed 401) bypasses the freshness check ONLY when it
+                // still targets the exact confirmed operation whose token was rejected — a
+                // concurrent refresh that already replaced it must never be forced again.
+                var forcingThisOperation = force && confirmedOperationId == rejectedConfirmedOperationId;
+                if (!forcingThisOperation && account.Connection.AccessExpiresAt is { } expiresAt && expiresAt > now) return;
                 var operation = new MarketplaceAccountOperation(MarketplaceAccountOperationKind.REFRESH, account.ProviderCode, account.Id, null, account.Version, account.CredentialReference, confirmedVersion, now);
                 operation.MarkExternalInFlight(now);
                 db.Add(operation);
@@ -114,33 +147,120 @@ public sealed class MarketplaceAuthorizationWorkflow
 
             if (claim is null) return new(true, "REFRESH_NOT_REQUIRED", accountId);
 
-            var read = await _store.UseConfirmedAsync(new ProtectedCredentialRead(accountId, claim.ProviderCode, claim.Reference, claim.PreviousVersion, claim.PreviousOperationId), cancellationToken);
+            // A-01: this credential/store read happens strictly BEFORE any provider bytes could be
+            // sent. It is therefore its OWN classified pre-invocation path: ANY failure here —
+            // including the caller's own cancellation firing mid-read — is proven NOT_SENT and must
+            // terminalize accordingly, never be left to propagate and strand the operation PENDING.
+            // Terminalization always uses a FRESH bounded token of its own: if the caller's token is
+            // what caused this to fail, reusing it here would make the terminalizing write itself
+            // fail immediately, which is exactly the "stuck PENDING" defect being fixed.
+            ProtectedCredentialReadResult read;
+            try
+            {
+                read = await _store.UseConfirmedAsync(new ProtectedCredentialRead(accountId, claim.ProviderCode, claim.Reference, claim.PreviousVersion, claim.PreviousOperationId), cancellationToken);
+            }
+            catch (Exception)
+            {
+                using var preSendCleanup = _cleanupBudgetFactory(TimeSpan.FromSeconds(10));
+                await FailRefreshNotSentAsync(claim.OperationId, accountId, "REFRESH_NOT_SENT", preSendCleanup.Token);
+                return new(false, "REFRESH_NOT_SENT", accountId);
+            }
             if (read.Outcome != ProtectedCredentialStoreOutcome.SUCCESS)
             {
-                await ResolvePendingAsync(claim.OperationId, cancellationToken);
+                using var preSendCleanup = _cleanupBudgetFactory(TimeSpan.FromSeconds(10));
+                if (read.Outcome == ProtectedCredentialStoreOutcome.STORE_UNAVAILABLE)
+                {
+                    // G-04: "Transient STORE_UNAVAILABLE blocks use ... it does not assert permanent
+                    // loss." Nothing was sent; authorization is fully preserved, not force-reauthorized.
+                    await FailRefreshNotSentAsync(claim.OperationId, accountId, "REFRESH_NOT_SENT", preSendCleanup.Token);
+                    return new(false, "REFRESH_NOT_SENT", accountId);
+                }
+                // NOT_FOUND/CORRUPTED_OR_UNDECRYPTABLE/VERSION_CONFLICT: confirmed-loss-shaped —
+                // "Material with no refresh token or a missing/unparseable secret" (ADR-0025 §F.3).
+                await ResolvePendingAsync(claim.OperationId, "REFRESH_TOKEN_UNAVAILABLE", preSendCleanup.Token);
                 return new(false, "REAUTHORIZATION_REQUIRED", accountId);
             }
+            // A-02: recover the CALLER's own already-exclusive array instead of allocating yet
+            // another copy whenever the shape allows it (see RecoverOwnedArrayOrCopy) — one fewer
+            // transient plaintext buffer this method would otherwise never get a chance to zero.
+            r1Buffer = RecoverOwnedArrayOrCopy(read.SecretMaterial);
 
+            // From here a connector call may actually be sent, using the CALLER's own token (so the
+            // caller can genuinely cancel a slow network call) — but every terminalization branch
+            // below creates its OWN fresh, independent bounded token at the moment IT begins, never
+            // sharing a budget with however long the network call itself took (A-01).
             MarketplaceRefreshCompletion completion;
             try
             {
-                completion = await connector.RefreshAsync(new MarketplaceRefreshRequest(accountId, claim.ProviderCode, read.SecretMaterial), cancellationToken);
+                completion = await connector.RefreshAsync(new MarketplaceRefreshRequest(accountId, claim.ProviderCode, r1Buffer, force), cancellationToken);
+            }
+            catch (MarketplaceRequestNotSentException ex)
+            {
+                using var cleanup = _cleanupBudgetFactory(TimeSpan.FromSeconds(10));
+                if (ex.Message == "REFRESH_TOKEN_UNAVAILABLE")
+                {
+                    // Proven NOT_SENT, but the material itself is unrenewable (no refresh token in
+                    // the decrypted secret): authorization cannot be preserved — there is nothing to
+                    // renew — even though nothing was sent.
+                    await ResolvePendingAsync(claim.OperationId, "REFRESH_TOKEN_UNAVAILABLE", cleanup.Token);
+                    return new(false, "REAUTHORIZATION_REQUIRED", accountId);
+                }
+                // Every other proven-NOT_SENT case (local validation/serialization/pre-send
+                // cancellation): the provider was never contacted, so prior authorization is fully
+                // preserved (CONNECTED) — only runtime moves to UNAVAILABLE. Never RequireReauthorization.
+                await FailRefreshNotSentAsync(claim.OperationId, accountId, ex.Message, cleanup.Token);
+                return new(false, ex.Message, accountId);
+            }
+            catch (MarketplaceProviderCallException ex)
+            {
+                using var cleanup = _cleanupBudgetFactory(TimeSpan.FromSeconds(10));
+                var code = MapRefreshFailureCode(ex.Failure);
+                if (ex.Failure.Classification == MarketplaceFailureClassification.RATE_LIMITED && ex.Failure.RetryAfterUntil is { } retryAfter)
+                    await RecordRefreshRetryAfterAsync(accountId, retryAfter, cleanup.Token);
+                await ResolvePendingAsync(claim.OperationId, code, cleanup.Token);
+                return new(false, "REAUTHORIZATION_REQUIRED", accountId);
             }
             catch
             {
-                // No send-certainty channel exists yet on the port; a failed/ambiguous exchange is
-                // treated conservatively (fail closed) rather than ever risking a blind replay.
-                await ResolvePendingAsync(claim.OperationId, cancellationToken);
+                // SENT_OR_UNKNOWN by default (G-08/G01): an error classification alone can never
+                // establish NOT_SENT. Never a blind replay.
+                using var cleanup = _cleanupBudgetFactory(TimeSpan.FromSeconds(10));
+                await ResolvePendingAsync(claim.OperationId, "REFRESH_OUTCOME_UNKNOWN", cleanup.Token);
                 return new(false, "REAUTHORIZATION_REQUIRED", accountId);
             }
 
-            var cas = await _store.CompareAndSwapReplaceAsync(new ProtectedCredentialWrite(claim.OperationId, null, accountId, claim.ProviderCode, claim.Reference, completion.SecretMaterial), claim.PreviousVersion, cancellationToken);
+            // Terminalization (success path) begins NOW — its own fresh bounded token, never the
+            // one (if any) that was ticking during the network call above.
+            using var terminal = _cleanupBudgetFactory(TimeSpan.FromSeconds(10));
+            var terminalToken = terminal.Token;
+            // A-02: MercadoLivreConnector.BuildSecretJson returns a whole-array ReadOnlyMemory (a
+            // MemoryStream.ToArray() result, never a slice) — recovering that EXACT array instance
+            // (instead of `.ToArray()`-ing a fresh copy of it) means the byte[] this method zeroes
+            // in `finally` IS the adapter's own buffer, not a separate copy that leaves the
+            // adapter-side array as a leftover, un-zeroed plaintext secret in the managed heap.
+            r2Buffer = RecoverOwnedArrayOrCopy(completion.SecretMaterial);
+            var write = new ProtectedCredentialWrite(claim.OperationId, null, accountId, claim.ProviderCode, claim.Reference, r2Buffer);
+            var cas = await _store.CompareAndSwapReplaceAsync(write, claim.PreviousVersion, terminalToken);
             if (cas.Outcome != ProtectedCredentialStoreOutcome.SUCCESS || cas.Receipt is null)
             {
-                // A foreign CAS conflict or write failure after a possibly-consumed single-use
-                // refresh token must never be silently retried against the provider.
-                await ResolvePendingAsync(claim.OperationId, cancellationToken);
-                return new(false, "REAUTHORIZATION_REQUIRED", accountId);
+                // "Never a second POST": exactly one additional persistence attempt of the IDENTICAL
+                // R2 bytes under the same operation ID — never a repeated provider call.
+                cas = await _store.CompareAndSwapReplaceAsync(write, claim.PreviousVersion, terminalToken);
+                if (cas.Outcome == ProtectedCredentialStoreOutcome.VERSION_CONFLICT)
+                {
+                    // The first attempt may actually have succeeded server-side and only its
+                    // acknowledgement was lost. A matching confirmed read at V+1 under this exact
+                    // operation ID is treated as an equivalent receipt (row 18); anything else falls
+                    // through to REFRESH_PERSISTENCE_FAILED.
+                    var confirmedCheck = await _store.UseConfirmedAsync(new ProtectedCredentialRead(accountId, claim.ProviderCode, claim.Reference, claim.PreviousVersion + 1, claim.OperationId), terminalToken);
+                    if (confirmedCheck.Outcome == ProtectedCredentialStoreOutcome.SUCCESS && confirmedCheck.Receipt is { } receipt && receipt.CredentialVersion == claim.PreviousVersion + 1)
+                        cas = new ProtectedCredentialStoreResult(ProtectedCredentialStoreOutcome.SUCCESS, receipt);
+                }
+                if (cas.Outcome != ProtectedCredentialStoreOutcome.SUCCESS || cas.Receipt is null)
+                {
+                    await ResolvePendingAsync(claim.OperationId, "REFRESH_PERSISTENCE_FAILED", terminalToken);
+                    return new(false, "REAUTHORIZATION_REQUIRED", accountId);
+                }
             }
 
             try
@@ -151,19 +271,78 @@ public sealed class MarketplaceAuthorizationWorkflow
                     if (operation.Decision != MarketplaceAccountOperationDecision.PENDING) throw new InvalidOperationException("MARKETPLACE_OPERATION_TERMINAL");
                     var account = await db.Set<MarketplaceAccount>().Include(x => x.Connection).SingleAsync(x => x.Id == accountId, ct);
                     operation.RecordPersistedCandidate(claim.Reference, cas.Receipt.CredentialVersion, _clock.UtcNow);
-                    account.InstallConfirmedCredential(claim.Reference, cas.Receipt.CredentialVersion, operation.Id, _clock.UtcNow);
+                    account.InstallConfirmedCredential(claim.Reference, cas.Receipt.CredentialVersion, operation.Id, _clock.UtcNow, completion.AccessExpiresAt, isRefresh: true);
                     operation.Confirm("REFRESHED", _clock.UtcNow);
-                }, cancellationToken);
+                }, terminalToken);
                 return new(true, "REFRESHED", accountId);
             }
             catch (DbUpdateException)
             {
-                await ResolvePendingAsync(claim.OperationId, cancellationToken);
+                await ResolvePendingAsync(claim.OperationId, "REFRESH_OUTCOME_UNKNOWN", terminalToken);
                 return new(false, "REAUTHORIZATION_REQUIRED", accountId);
             }
         }
-        finally { accountLock.Release(); }
+        finally
+        {
+            accountLock.Release();
+            // A-02: zeroed only after the FINAL persistence/receipt decision on every exit path
+            // above — never before a permitted same-R2 retry has had its chance to complete.
+            if (r1Buffer is not null) CryptographicOperations.ZeroMemory(r1Buffer);
+            if (r2Buffer is not null) CryptographicOperations.ZeroMemory(r2Buffer);
+        }
     }
+
+    /// <summary>D-02, F.3 rows 1-3: a proven pre-send failure preserves current authorization
+    /// exactly — CONNECTED is never disturbed, only runtime moves to UNAVAILABLE — and the
+    /// operation is FAIL_CLOSED with the connector's own safe code. Never a blind replay, never
+    /// reauthorization for a request that never reached the provider.</summary>
+    private async Task FailRefreshNotSentAsync(Guid operationId, Guid accountId, string safeCode, CancellationToken cancellationToken) =>
+        await _uow.ExecuteAsync(async (db, ct) =>
+        {
+            var operation = await db.Set<MarketplaceAccountOperation>().FromSqlInterpolated($"SELECT * FROM commerce.marketplace_account_operation WHERE id = {operationId} FOR UPDATE").SingleAsync(ct);
+            if (operation.Decision != MarketplaceAccountOperationDecision.PENDING) return;
+            operation.FailClosed(safeCode, _clock.UtcNow);
+            operation.RequestCleanup(_clock.UtcNow);
+            var account = await db.Set<MarketplaceAccount>().Include(x => x.Connection).SingleAsync(x => x.Id == accountId, ct);
+            account.RecordRuntimeFailure("UNKNOWN", safeCode, _clock.UtcNow);
+        }, cancellationToken);
+
+    /// <summary>F.3 row 15: Retry-After is diagnostic only for a rejected refresh (the account still
+    /// goes REAUTHORIZATION_REQUIRED) but is still persisted so a later probe/business attempt can
+    /// honor it (D-03).</summary>
+    private async Task RecordRefreshRetryAfterAsync(Guid accountId, DateTimeOffset until, CancellationToken cancellationToken) =>
+        await _uow.ExecuteAsync(async (db, ct) =>
+        {
+            var account = await db.Set<MarketplaceAccount>().Include(x => x.Connection).SingleAsync(x => x.Id == accountId, ct);
+            account.RecordRetryAfter(until, _clock.UtcNow);
+        }, cancellationToken);
+
+    /// <summary>ADR-0025 §F.3: maps a connector's normalized provider failure to the refresh-specific
+    /// safe result code. Any classification/safe-code this map does not specifically recognize
+    /// conservatively becomes REFRESH_OUTCOME_UNKNOWN — never assumed safe to replay.</summary>
+    private static string MapRefreshFailureCode(MarketplaceProviderFailure failure) => failure.SafeCode switch
+    {
+        "PROVIDER_APP_CREDENTIALS_INVALID" => "PROVIDER_APP_CREDENTIALS_INVALID",
+        "PROVIDER_GRANT_REJECTED" => "REFRESH_REJECTED",
+        "PROVIDER_REQUEST_REJECTED" => "REFRESH_REJECTED",
+        "PROVIDER_RATE_LIMITED" => "REFRESH_RATE_LIMITED",
+        _ => "REFRESH_OUTCOME_UNKNOWN",
+    };
+
+    /// <summary>A-02: when <paramref name="material"/> IS a directly-owned, whole array (the shape
+    /// every current caller actually produces — <c>MercadoLivreConnector.BuildSecretJson</c>'s own
+    /// <c>MemoryStream.ToArray()</c> result, and <c>LocalProtectedCredentialStore</c>'s own
+    /// <c>Convert.FromBase64String</c> result — both freshly allocated, exclusively owned, never a
+    /// slice of anything larger), this recovers that SAME array instance so the caller zeroes the
+    /// ACTUAL buffer the adapter/store handed over, never a separate copy that leaves the
+    /// original as an un-zeroed, un-tracked plaintext secret sitting in the managed heap. Only when
+    /// the memory is a slice — offset &gt; 0, or shorter than its backing array — does this fall
+    /// back to an explicit, independently zeroable copy, so this is safe for any future connector
+    /// that returns a slice instead.</summary>
+    private static byte[] RecoverOwnedArrayOrCopy(ReadOnlyMemory<byte> material) =>
+        MemoryMarshal.TryGetArray(material, out var segment) && segment.Offset == 0 && segment.Array is { } array && segment.Count == array.Length
+            ? array
+            : material.ToArray();
 
     private sealed record RefreshClaim(Guid OperationId, string Reference, long PreviousVersion, Guid PreviousOperationId, string ProviderCode);
 
@@ -182,49 +361,95 @@ public sealed class MarketplaceAuthorizationWorkflow
             var account = await db.Set<MarketplaceAccount>().AsNoTracking().Include(x => x.Connection).SingleOrDefaultAsync(x => x.Id == accountId, ct);
             if (account is null) return null;
             var channelActive = await db.Set<SalesChannel>().AnyAsync(x => x.Id == account.SalesChannelId && x.Active && x.Kind == SalesChannelKind.Marketplace, ct);
-            return new ProbeSnapshot(account.Version, account.Active, channelActive, account.ProviderCode, account.CredentialReference, account.Connection.AuthorizationState, account.Connection.ConfirmedCredentialVersion, account.Connection.ConfirmedOperationId);
+            return new ProbeSnapshot(account.Version, account.Active, channelActive, account.ProviderCode, account.ExternalAccountId, account.CredentialReference, account.Connection.AuthorizationState, account.Connection.ConfirmedCredentialVersion, account.Connection.ConfirmedOperationId, account.Connection.RuntimeRetryAfterUntil);
         }, cancellationToken) ?? throw new KeyNotFoundException();
 
         if (snapshot.Version != expectedVersion) throw new InvalidOperationException("CONCURRENCY_CONFLICT");
+        // D-03: a persisted provider Retry-After/backoff guard is honored even by the Owner's
+        // explicit probe — ADR-0024 §5 "Probe honors persisted RuntimeRetryAfterUntil; it does not
+        // bypass 429, including after restart." An expired guard (now >= until) permits the probe.
+        if (snapshot.RuntimeRetryAfterUntil is { } retryAfterUntil && retryAfterUntil > now)
+            return new(false, "PROBE_RATE_LIMITED", accountId);
         if (!snapshot.Active || !snapshot.ChannelActive || snapshot.AuthorizationState != MarketplaceAuthorizationState.CONNECTED
-            || snapshot.CredentialReference is null || snapshot.ConfirmedCredentialVersion is not { } version || snapshot.ConfirmedOperationId is not { } operationId)
+            || snapshot.CredentialReference is null || snapshot.ConfirmedCredentialVersion is null || snapshot.ConfirmedOperationId is null)
             return new(false, "MARKETPLACE_AUTHORIZATION_NOT_USABLE", accountId);
         if (!_registry.TryGet(snapshot.ProviderCode, out var connector)) return new(false, "MARKETPLACE_PROVIDER_NOT_SUPPORTED", accountId);
 
-        var read = await _store.UseConfirmedAsync(new ProtectedCredentialRead(accountId, snapshot.ProviderCode, snapshot.CredentialReference, version, operationId), cancellationToken);
-        if (read.Outcome != ProtectedCredentialStoreOutcome.SUCCESS)
+        try
         {
-            // ADR-0024 §5/G-05: NOT_FOUND/CORRUPTED_OR_UNDECRYPTABLE mean the confirmed credential
-            // is CONFIRMED lost, not merely transiently unreachable — CommerceEndpoints.RequiredAction
-            // only ever surfaces "REAUTHORIZE_AFTER_STORE_LOSS" (and the frontend's dedicated
-            // recovery button/copy) when SafeFailureCode="PROBE_CREDENTIAL_UNREADABLE" is paired
-            // with AuthorizationState=REAUTHORIZATION_REQUIRED — CONNECTED+UNAVAILABLE always takes
-            // priority as "CHECK_PROVIDER_ACCOUNT" regardless of SafeFailureCode (a real defect
-            // this fixes: a probe against a confirmed-lost local credential used to stay CONNECTED
-            // and tell the Owner to "check the provider account" instead of routing them to
-            // reauthorize). A genuinely transient outcome (STORE_UNAVAILABLE/VERSION_CONFLICT) is
-            // NOT a confirmed loss and keeps the milder runtime-failure treatment.
-            if (read.Outcome is ProtectedCredentialStoreOutcome.NOT_FOUND or ProtectedCredentialStoreOutcome.CORRUPTED_OR_UNDECRYPTABLE)
+            // A-05: routed through the shared credential executor (guards + refresh-margin
+            // coordination + secret provisioning). Probe supplies no requiredCapabilityCode — it
+            // needs no unrelated business capability (ADR-0024 §5) — and keeps ALL of its own
+            // grant-writing/runtime-promotion authority entirely on this side of the call.
+            var inspection = await _credentialExecutor.ExecuteAsync(accountId, MarketplaceExecutionRequirement.Probe,
+                (context, ct) => connector.InspectAsync(new MarketplaceAccountInspectionRequest(context.AccountId, snapshot.ProviderCode, context.Secret), ct),
+                cancellationToken);
+
+            // A-04: the connector's own InspectAsync already proved "token user_id == /users/me.id"
+            // (and site MLB). The ONE comparison only the workflow can make — because the connector
+            // never receives it — is that this returned identity also matches what THIS VERCE
+            // account itself claims to be. Without this check, a credential that is internally
+            // self-consistent but was stored under the WRONG account row would silently pass.
+            if (!string.Equals(inspection.ExternalAccountId, snapshot.ExternalAccountId, StringComparison.Ordinal))
+            {
                 await _uow.ExecuteAsync(async (db, ct) =>
                 {
                     var account = await db.Set<MarketplaceAccount>().Include(x => x.Connection).SingleAsync(x => x.Id == accountId, ct);
-                    account.RequireReauthorization("PROBE_CREDENTIAL_UNREADABLE", _clock.UtcNow);
+                    account.RequireReauthorization("PROBE_IDENTITY_MISMATCH", _clock.UtcNow);
                 }, cancellationToken);
-            else
-                await MarkUnavailableAsync(accountId, "CREDENTIAL_UNREADABLE", "PROBE_CREDENTIAL_UNREADABLE", cancellationToken);
-            return new(false, "PROBE_CREDENTIAL_UNREADABLE", accountId);
-        }
+                return new(false, "PROBE_IDENTITY_MISMATCH", accountId);
+            }
 
-        try
-        {
-            var inspection = await connector.InspectAsync(new MarketplaceAccountInspectionRequest(accountId, snapshot.ProviderCode, read.SecretMaterial), cancellationToken);
             await _uow.ExecuteAsync(async (db, ct) =>
             {
                 var account = await db.Set<MarketplaceAccount>().Include(x => x.Connection).Include(x => x.Capabilities).SingleAsync(x => x.Id == accountId, ct);
-                foreach (var grant in inspection.Grants) account.SetCapability(grant.Key, grant.Value, "PROBE", null, _clock.UtcNow);
+                // D-03: grant source must be PROBE_INSPECTION, not the previous generic "PROBE".
+                foreach (var grant in inspection.Grants) account.SetCapability(grant.Key, grant.Value, "PROBE_INSPECTION", null, _clock.UtcNow);
                 account.MarkAvailable(_clock.UtcNow);
             }, cancellationToken);
             return new(true, "PROBE_AVAILABLE", accountId);
+        }
+        catch (MarketplaceExecutionBlockedException ex) when (ex.Reason == "RATE_LIMITED")
+        {
+            return new(false, "PROBE_RATE_LIMITED", accountId);
+        }
+        catch (MarketplaceExecutionBlockedException ex) when (ex.Reason == "CREDENTIAL_CONFIRMED_LOST")
+        {
+            // ADR-0024 §5/RT-03: a CONFIRMED loss (not merely transiently unreachable) routes to
+            // REAUTHORIZATION_REQUIRED — CommerceEndpoints.RequiredAction only ever surfaces
+            // "REAUTHORIZE_AFTER_STORE_LOSS" when SafeFailureCode="PROBE_CREDENTIAL_UNREADABLE" is
+            // paired with AuthorizationState=REAUTHORIZATION_REQUIRED (CONNECTED+UNAVAILABLE always
+            // takes priority as "CHECK_PROVIDER_ACCOUNT" regardless of SafeFailureCode).
+            await _uow.ExecuteAsync(async (db, ct) =>
+            {
+                var account = await db.Set<MarketplaceAccount>().Include(x => x.Connection).SingleAsync(x => x.Id == accountId, ct);
+                account.RequireReauthorization("PROBE_CREDENTIAL_UNREADABLE", _clock.UtcNow);
+            }, cancellationToken);
+            return new(false, "PROBE_CREDENTIAL_UNREADABLE", accountId);
+        }
+        catch (MarketplaceExecutionBlockedException ex) when (ex.Reason == "CREDENTIAL_STORE_UNAVAILABLE")
+        {
+            // Genuinely transient — NOT a confirmed loss — keeps the milder runtime-failure treatment.
+            await MarkUnavailableAsync(accountId, "CREDENTIAL_UNREADABLE", "PROBE_CREDENTIAL_UNREADABLE", cancellationToken);
+            return new(false, "PROBE_CREDENTIAL_UNREADABLE", accountId);
+        }
+        catch (MarketplaceExecutionBlockedException)
+        {
+            // A race between this method's own pre-check above and the executor's fresh re-check
+            // (account/channel/authorization changed concurrently) — never silently proceed.
+            return new(false, "MARKETPLACE_AUTHORIZATION_NOT_USABLE", accountId);
+        }
+        // ADR-0025 §A.9: a proven identity mismatch during probe (the confirmed token now resolves
+        // to a DIFFERENT provider identity than the one embedded at issuance) is not a transient
+        // runtime failure — it must force reauthorization, never merely CHECK_PROVIDER_ACCOUNT.
+        catch (MarketplaceProviderCallException ex) when (ex.Failure.SafeCode == "PROBE_IDENTITY_MISMATCH")
+        {
+            await _uow.ExecuteAsync(async (db, ct) =>
+            {
+                var account = await db.Set<MarketplaceAccount>().Include(x => x.Connection).SingleAsync(x => x.Id == accountId, ct);
+                account.RequireReauthorization("PROBE_IDENTITY_MISMATCH", _clock.UtcNow);
+            }, cancellationToken);
+            return new(false, "PROBE_IDENTITY_MISMATCH", accountId);
         }
         catch
         {
@@ -240,7 +465,7 @@ public sealed class MarketplaceAuthorizationWorkflow
             account.RecordRuntimeFailure(classification, safeCode, _clock.UtcNow);
         }, cancellationToken);
 
-    private sealed record ProbeSnapshot(long Version, bool Active, bool ChannelActive, string ProviderCode, string? CredentialReference, MarketplaceAuthorizationState AuthorizationState, long? ConfirmedCredentialVersion, Guid? ConfirmedOperationId);
+    private sealed record ProbeSnapshot(long Version, bool Active, bool ChannelActive, string ProviderCode, string ExternalAccountId, string? CredentialReference, MarketplaceAuthorizationState AuthorizationState, long? ConfirmedCredentialVersion, Guid? ConfirmedOperationId, DateTimeOffset? RuntimeRetryAfterUntil);
 
     /// <summary>PENDING -> REVOKED by the initiating Owner before any exchange has happened.</summary>
     public async Task<MarketplaceWorkflowResult> CancelSessionAsync(Guid sessionId, Guid actorId, long expectedVersion, CancellationToken cancellationToken)
@@ -289,7 +514,7 @@ public sealed class MarketplaceAuthorizationWorkflow
                 // establish [NOT_SENT]"): ResolvePendingAsync's CONNECT_NEW branch conservatively
                 // fails every currently CONNECTED account for this provider closed, since we
                 // cannot prove which, if any, existing identity this ambiguous exchange affected.
-                await ResolvePendingAsync(claim.OperationId, cancellationToken);
+                await ResolvePendingAsync(claim.OperationId, cancellationToken: cancellationToken);
                 return new(false, "AUTHORIZATION_EXCHANGE_FAILED");
             }
 
@@ -325,13 +550,13 @@ public sealed class MarketplaceAuthorizationWorkflow
             }
             if (staged.Outcome != ProtectedCredentialStoreOutcome.SUCCESS || staged.Receipt is null)
             {
-                await ResolvePendingAsync(claim.OperationId, cancellationToken);
+                await ResolvePendingAsync(claim.OperationId, cancellationToken: cancellationToken);
                 return new(false, "CREDENTIAL_PERSISTENCE_FAILED");
             }
             var bound = await _store.BindCandidateAsync(new ProtectedCredentialBinding(claim.OperationId, claim.SessionId, candidateAccountId, input.ProviderCode, candidateReference), cancellationToken);
             if (bound.Outcome != ProtectedCredentialStoreOutcome.SUCCESS)
             {
-                await ResolvePendingAsync(claim.OperationId, cancellationToken);
+                await ResolvePendingAsync(claim.OperationId, cancellationToken: cancellationToken);
                 return new(false, "CREDENTIAL_BINDING_FAILED");
             }
             try
@@ -350,14 +575,14 @@ public sealed class MarketplaceAuthorizationWorkflow
                 // calling it here guarantees the bound account (if any) is actually marked
                 // REAUTHORIZATION_REQUIRED even in the rare case this callback is the FIRST to
                 // observe the terminal state, not merely a late arrival behind an external resolver.
-                await ResolvePendingAsync(claim.OperationId, cancellationToken);
+                await ResolvePendingAsync(claim.OperationId, cancellationToken: cancellationToken);
                 await _store.DeleteCandidateAsync(claim.OperationId, candidateReference, staged.Receipt.CredentialVersion, cancellationToken);
                 return new(false, "OPERATION_RECOVERY_FAIL_CLOSED");
             }
             var promoted = await _store.PromoteCandidateAsync(claim.OperationId, candidateReference, staged.Receipt.CredentialVersion, cancellationToken);
             if (promoted.Outcome != ProtectedCredentialStoreOutcome.SUCCESS)
             {
-                await ResolvePendingAsync(claim.OperationId, cancellationToken);
+                await ResolvePendingAsync(claim.OperationId, cancellationToken: cancellationToken);
                 await _store.DeleteCandidateAsync(claim.OperationId, candidateReference, staged.Receipt.CredentialVersion, cancellationToken);
                 return new(false, "CREDENTIAL_CONFIRMATION_FAILED");
             }
@@ -373,7 +598,7 @@ public sealed class MarketplaceAuthorizationWorkflow
                 // single place that fails the operation closed AND marks the bound account (for
                 // RECONNECT) or every provider account (for an unbound CONNECT_NEW) — it must run
                 // here, not only be assumed to have already run.
-                await ResolvePendingAsync(claim.OperationId, cancellationToken);
+                await ResolvePendingAsync(claim.OperationId, cancellationToken: cancellationToken);
                 await _store.DeleteCandidateAsync(claim.OperationId, candidateReference, staged.Receipt.CredentialVersion, cancellationToken);
                 return new(false, "OPERATION_RECOVERY_FAIL_CLOSED");
             }
@@ -466,7 +691,9 @@ public sealed class MarketplaceAuthorizationWorkflow
                     db.Add(account);
                 }
                 operation.BindAccount(account.Id);
-                account.InstallConfirmedCredential(reference, version, operation.Id, now);
+                // D-01: persist the provider-declared access-token expiry on the initial
+                // connect/reconnect confirmation too (not just refresh).
+                account.InstallConfirmedCredential(reference, version, operation.Id, now, completion.AccessExpiresAt);
                 foreach (var grant in completion.Grants) account.SetCapability(grant.Key, grant.Value, "AUTH_INSPECTION", null, now);
                 var safeCode = recoveredFromStoreLoss ? "AUTHORIZED_AFTER_STORE_LOSS" : "AUTHORIZED";
                 operation.Confirm(safeCode, now);
@@ -484,7 +711,7 @@ public sealed class MarketplaceAuthorizationWorkflow
             // "Its successful exchange may have superseded the winner's credential": under
             // UNKNOWN/MAY_SUPERSEDE_EXISTING impact the winner must not remain falsely CONNECTED
             // on an unconfirmed assumption that its own exchange is still the valid one.
-            await ResolvePendingAsync(claim.OperationId, cancellationToken);
+            await ResolvePendingAsync(claim.OperationId, cancellationToken: cancellationToken);
             await _store.DeleteCandidateAsync(claim.OperationId, reference, version, cancellationToken);
             if (completion.CredentialImpact != CredentialImpact.PRESERVES_EXISTING)
             {
@@ -553,7 +780,11 @@ public sealed class MarketplaceAuthorizationWorkflow
         }, cancellationToken);
     }
 
-    public async Task<MarketplaceWorkflowResult> ResolvePendingAsync(Guid operationId, CancellationToken cancellationToken)
+    /// <summary>D-02: <paramref name="safeCode"/> is the terminal fail-closed/reauthorization code
+    /// recorded on the operation and (when an account is bound) on the account itself — defaults to
+    /// the pre-existing generic recovery code so callback/startup/cleanup resolution paths that
+    /// never pass a specific code keep their exact previous behavior.</summary>
+    public async Task<MarketplaceWorkflowResult> ResolvePendingAsync(Guid operationId, string safeCode = "OPERATION_RECOVERY_FAIL_CLOSED", CancellationToken cancellationToken = default)
     {
         var now = _clock.UtcNow;
         await _uow.ExecuteAsync(async (db, ct) =>
@@ -583,18 +814,21 @@ public sealed class MarketplaceAuthorizationWorkflow
                     && candidateVersion == (operation.PreviousConfirmedCredentialVersion ?? 0) + 1;
                 if (guardsHold)
                 {
-                    refreshAccount.InstallConfirmedCredential(candidateReference, candidateVersion, operation.Id, now);
+                    // D-01: a receipt-only refresh recovery has no way to know the provider's
+                    // original expires_in — leave it null so the very next use forces a fresh
+                    // refresh rather than assuming/guessing a value.
+                    refreshAccount.InstallConfirmedCredential(candidateReference, candidateVersion, operation.Id, now, accessExpiresAt: null, isRefresh: true);
                     operation.Confirm("REFRESHED_FROM_RECEIPT", now);
                     return;
                 }
             }
 
-            operation.FailClosed("OPERATION_RECOVERY_FAIL_CLOSED", now);
+            operation.FailClosed(safeCode, now);
             operation.RequestCleanup(now);
             if (operation.MarketplaceAccountId is { } accountId)
             {
                 var account = await db.Set<MarketplaceAccount>().Include(x => x.Connection).SingleAsync(x => x.Id == accountId, ct);
-                account.RequireReauthorization("OPERATION_RECOVERY_FAIL_CLOSED", now);
+                account.RequireReauthorization(safeCode, now);
             }
             else if (operation.Kind == MarketplaceAccountOperationKind.CONNECT_NEW)
             {
@@ -613,10 +847,10 @@ public sealed class MarketplaceAuthorizationWorkflow
             if (operation.AuthorizationSessionId is { } sessionId)
             {
                 var session = await db.Set<MarketplaceAuthorizationSession>().SingleAsync(x => x.Id == sessionId, ct);
-                if (session.Status == MarketplaceAuthorizationSessionStatus.CLAIMED) session.Fail("OPERATION_RECOVERY_FAIL_CLOSED", now);
+                if (session.Status == MarketplaceAuthorizationSessionStatus.CLAIMED) session.Fail(safeCode, now);
             }
         }, cancellationToken);
-        return new(true, "OPERATION_RECOVERY_FAIL_CLOSED");
+        return new(true, safeCode);
     }
 
     // ---- Housekeeping (ADR-0024 "Cleanup"): shared by the Quartz job and the startup pass. ----
@@ -663,7 +897,7 @@ public sealed class MarketplaceAuthorizationWorkflow
         var resolved = 0;
         foreach (var id in operationIds)
         {
-            try { await ResolvePendingAsync(id, cancellationToken); resolved++; }
+            try { await ResolvePendingAsync(id, cancellationToken: cancellationToken); resolved++; }
             catch (KeyNotFoundException) { }
         }
 

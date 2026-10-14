@@ -141,6 +141,11 @@ public sealed class MarketplaceAuthorizationRt03Tests : IAsyncLifetime
         var account = await db.Set<MarketplaceAccount>().SingleAsync(x => x.Id == accountId);
         account.CredentialReference.Should().Be(k2Reference, "the DB pointer must still name K2 — a restored K1 backup changes nothing about current authority");
 
+        // A-04: probe now also verifies the returned identity against this VERCE account's own
+        // ExternalAccountId; the fake must be told what identity K2 actually reports (the SAME one
+        // this account was connected/reconnected under), exactly like a real provider's token would.
+        _harness.ControlPlane.BindAccountIdentity(accountId, externalId, new Dictionary<string, AccountCapabilityState>());
+
         // A probe (the ordinary post-reconnect availability check) must use K2, not the reappeared K1.
         var probe = await _owner.PostAsync($"/api/commerce/marketplace-accounts/{accountId}/probe", new ReauthorizeMarketplaceAccountRequest(account.Version));
         probe.StatusCode.Should().Be(HttpStatusCode.OK, await probe.Content.ReadAsStringAsync());

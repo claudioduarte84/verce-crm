@@ -14,6 +14,13 @@
   verbatim in substance). G01–G06 and D12 scanner self-test architecture: independent Codex Sol
   final regates **APPROVED** on 2026-09-26. Further Astra review was not required.
 
+> **Supersession (narrow).** [ADR-0026](ADR-0026-s8c2-listing-sync-authority-continuation.md)
+> clarifies and supersedes only the literal operation-ID equality in the §E.6 runtime-guard sentence.
+> "Still equals `confirmed_operation_id_at_start`" means the same authorization: the identical
+> operation or exactly one direct, proven REFRESH continuation. ADR-0026 also records the
+> provider-derived persistence authority predicate and confirms that the §E.6 terminal outcome is
+> item-derived. Every other rule of this ADR stands as written below.
+
 ## Context
 
 S8C.1 shipped a provider-neutral authorization foundation exercised only by a test fake. S8C.2
@@ -485,6 +492,8 @@ Runtime (ADR-0024 G-04, not the listing summary): a run with ≥ 1 successful pr
 classification; guard/credential stops do not touch runtime. Written only in the fenced finish
 transaction and only if `ConfirmedOperationId` still equals `confirmed_operation_id_at_start`.
 Sync never writes grants.
+*(Clarified by [ADR-0026](ADR-0026-s8c2-listing-sync-authority-continuation.md): "still equals" =
+the shared authority predicate, i.e. identity or one direct proven REFRESH continuation.)*
 
 **E.7 Retry (FAILED_ONLY).** `POST /marketplace-listing-syncs/{runId}/retry` creates a **new** run:
 `kind = FAILED_ONLY`, `retry_of_run_id = runId`, `root_run_id = original.root_run_id`. Allowed when the
@@ -789,6 +798,10 @@ No personal data. Retention unchanged (180 days, latest kept).
 | `POST /marketplace-accounts/{id}/sku-mappings` | `commerce:manage` + antiforgery | `{externalSku, productId, replaceMappingId?, replaceMappingVersion?}`; 201; `SKU_MAPPING_CONFLICT` 409, `SKU_MAPPING_PRODUCT_INELIGIBLE` 422 |
 | `POST /sku-mappings/{mappingId}/deactivate` | `commerce:manage` + antiforgery | `{version}`; 204 |
 
+*(Deactivation replay — an already INACTIVE mapping, a stale version, concurrent requests — is defined by
+[ADR-0028](ADR-0028-s8c2-sku-mapping-deactivation-replay.md).)*
+*(`requiredAction` on both listing-sync surfaces is defined by
+[ADR-0027](ADR-0027-s8c2-listing-sync-required-action.md).)*
 Run DTO: `runId, accountId, kind, status, phase, rootRunId, retryOfRunId, requestedAt, startedAt,
 finishedAt, attemptCount, enumerationCompleted, counters, safeResultCode, requiredAction`.
 `blockedReason` catalog: `ACCOUNT_INACTIVE, CHANNEL_INVALID, PROVIDER_NOT_CONFIGURED,

@@ -27,7 +27,8 @@ public sealed record PublishedItemReadModel(Guid Id, string ProviderCode, Guid M
     string? Title, decimal? ObservedPrice, MarketplaceListingStatus ObservedStatus, Guid? ProductId, string? ProductCode,
     string? ProductName, Guid? ChannelOfferId, MarketplaceLinkageState LinkageState, MarketplaceSyncState SyncState,
     DateTimeOffset? LastObservedAt, DateTimeOffset? LastSyncAttemptAt, DateTimeOffset? LastSuccessfulSyncAt,
-    string? SafeSyncError, long Version);
+    string? SafeSyncError, long Version, string? ListingUrl, string? ProviderNativeStatus, int? VariationCount,
+    [property: System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MarketplaceListingLinkageSource>))] MarketplaceListingLinkageSource? LinkageSource);
 public sealed record PublishedItemsResponse(IReadOnlyList<PublishedItemReadModel> Items, int Page, int PageSize, int Total);
 
 public static class CommerceReadModels
@@ -146,7 +147,7 @@ public static class CommerceReadModels
                 row.ExternalListingId, row.ExternalSku, row.TitleSnapshot, row.ObservedPrice, row.ObservedStatus,
                 row.ProductId, product?.Code, product?.Name, row.ChannelOfferId, row.LinkageState, row.SyncState,
                 row.ProviderObservedAt, row.LastSyncAttemptAt,
-                row.LastSuccessfulSyncAt, row.SyncError, row.Version);
+                row.LastSuccessfulSyncAt, row.SyncError, row.Version, row.ListingUrl, row.ProviderNativeStatus, row.VariationCount, row.LinkageSource);
         }).ToArray();
         return Results.Ok(new PublishedItemsResponse(items, safePage, size, total));
     }

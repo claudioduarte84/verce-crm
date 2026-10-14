@@ -232,6 +232,81 @@ public sealed class MarketplaceCallbackSecurityTests : IAsyncLifetime
         allLogs.Should().NotContain(state);
     }
 
+    // ================= A-09: state/code MUST bind as optional (never a bare 400 before the workflow runs) =================
+
+    [Theory]
+    [InlineData(true, false)]  // state present, code missing
+    [InlineData(false, true)]  // state missing, code present
+    [InlineData(false, false)] // both missing
+    public async Task Callback_with_missing_state_or_code_is_classified_by_the_workflow_not_rejected_by_model_binding(bool includeState, bool includeCode)
+    {
+        var externalId = "EXT-" + Guid.NewGuid().ToString("N")[..12];
+        var (sessionId, callbackUrl) = await BeginAuthorizationAsync();
+        _harness.ControlPlane.Configure(sessionId, new FakeMarketplaceScenario(externalId));
+
+        var uri = new Uri(new Uri("https://x"), callbackUrl);
+        var query = HttpUtility.ParseQueryString(uri.Query);
+        var state = query["state"]!;
+        var path = uri.AbsolutePath;
+        var parts = new List<string>();
+        if (includeState) parts.Add("state=" + Uri.EscapeDataString(state));
+        if (includeCode) parts.Add("code=fake-code");
+        var url = path + (parts.Count > 0 ? "?" + string.Join("&", parts) : "");
+
+        var response = await _owner.GetAsync(url);
+        // ADR-0025 §A.4: never a raw ASP.NET model-binding 400 — the workflow's own redirect to the
+        // fixed failed-result route, exactly like any other rejected callback. The test client
+        // auto-follows that redirect to a frontend SPA route the TestServer does not itself serve
+        // (a 404 on the FINAL hop), so the same lenient status set the rest of this suite already
+        // uses applies here too; the actually-visited URL is what proves the redirect target.
+        response.StatusCode.Should().BeOneOf(HttpStatusCode.Redirect, HttpStatusCode.Found, HttpStatusCode.OK, HttpStatusCode.NotFound);
+        response.RequestMessage!.RequestUri!.ToString().Should().Contain("/marketplace-accounts").And.Contain("authorization=failed");
+
+        // No secret/query value echoed, and the session is left exactly as a normal invalid
+        // callback would (still PENDING/expirable — never silently claimed or corrupted).
+        await using var db = _fixture.CreateContext();
+        var session = await db.Set<MarketplaceAuthorizationSession>().SingleAsync(x => x.Id == sessionId);
+        session.Status.Should().Be(MarketplaceAuthorizationSessionStatus.PENDING, "a callback missing state/code never even reaches the workflow, so the session is untouched");
+    }
+
+    [Fact]
+    public async Task Callback_with_valid_state_and_code_still_succeeds_after_the_optional_binding_change()
+    {
+        var externalId = "EXT-" + Guid.NewGuid().ToString("N")[..12];
+        var (sessionId, callbackUrl) = await BeginAuthorizationAsync();
+        _harness.ControlPlane.Configure(sessionId, new FakeMarketplaceScenario(externalId));
+        var response = await _owner.GetAsync(callbackUrl);
+        response.StatusCode.Should().BeOneOf(HttpStatusCode.Redirect, HttpStatusCode.Found, HttpStatusCode.OK, HttpStatusCode.NotFound);
+        response.RequestMessage!.RequestUri!.ToString().Should().Contain("authorization=completed");
+    }
+
+    [Fact]
+    public async Task Callback_with_a_provider_denial_state_present_error_present_code_absent_is_handled_safely()
+    {
+        // ADR-0025 §A.4 / ML-AUTH: "error, error_description and any other field are never read,
+        // stored or logged." A denial callback carries `error` (and often `error_description`) but
+        // NO `code` — `code` remains optional-binding-absent, so this must be classified by the
+        // workflow exactly like any other missing-code callback: never a raw model-binding 400,
+        // never any leak of `error`/`error_description`, and the session is left untouched.
+        var (sessionId, callbackUrl) = await BeginAuthorizationAsync();
+        var uri = new Uri(new Uri("https://x"), callbackUrl);
+        var state = HttpUtility.ParseQueryString(uri.Query)["state"]!;
+        var denialUrl = uri.AbsolutePath + "?state=" + Uri.EscapeDataString(state)
+            + "&error=access_denied&error_description=" + Uri.EscapeDataString("SENTINEL-DENIAL-should-never-be-logged-or-echoed");
+
+        var response = await _owner.GetAsync(denialUrl);
+        response.StatusCode.Should().BeOneOf(HttpStatusCode.Redirect, HttpStatusCode.Found, HttpStatusCode.OK, HttpStatusCode.NotFound);
+        response.RequestMessage!.RequestUri!.ToString().Should().Contain("authorization=failed");
+        response.RequestMessage!.RequestUri!.ToString().Should().NotContain("SENTINEL-DENIAL").And.NotContain("access_denied");
+
+        await using var db = _fixture.CreateContext();
+        var session = await db.Set<MarketplaceAuthorizationSession>().SingleAsync(x => x.Id == sessionId);
+        session.Status.Should().Be(MarketplaceAuthorizationSessionStatus.PENDING, "a denial callback with no code never reaches the workflow — ADR-0024 §2 session semantics are unaffected");
+
+        var allLogs = string.Join("\n", _harness.Logs.Messages);
+        allLogs.Should().NotContain("SENTINEL-DENIAL").And.NotContain("access_denied");
+    }
+
     private async Task<string> CaptureBrowserBindingCookieAsync(Guid sessionId)
     {
         // Re-derive the exact Set-Cookie value from this session's begin response by re-reading

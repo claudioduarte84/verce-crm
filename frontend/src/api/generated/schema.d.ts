@@ -3269,6 +3269,473 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/commerce/marketplace-accounts/{id}/listing-syncs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListingSyncRunResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-listing-syncs/{runId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    runId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListingSyncRunResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Service Unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-accounts/{id}/listing-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListingSyncStatusResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-listing-syncs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    runId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ListingSyncRunResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-listing-syncs/{runId}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    outcome?: components["schemas"]["MarketplaceListingSyncItemOutcome"];
+                    page?: number | string;
+                    pageSize?: number | string;
+                };
+                header?: never;
+                path: {
+                    runId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResponseOfListingSyncRunItemResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/marketplace-accounts/{id}/sku-mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    active?: boolean;
+                    page?: number | string;
+                    pageSize?: number | string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PagedResponseOfSkuMappingResponse"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SkuMappingConfirmRequest"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SkuMappingResponse"];
+                    };
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Unprocessable Entity */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/commerce/sku-mappings/{mappingId}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    mappingId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SkuMappingDeactivateRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad Request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["ProblemDetails"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/commerce/offers/{id}": {
         parameters: {
             query?: never;
@@ -3547,9 +4014,9 @@ export interface paths {
         };
         get: {
             parameters: {
-                query: {
-                    state: string;
-                    code: string;
+                query?: {
+                    state?: string;
+                    code?: string;
                 };
                 header?: never;
                 path: {
@@ -3608,7 +4075,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["PublishedItemsResponse"];
+                    };
                 };
             };
         };
@@ -4956,6 +5425,85 @@ export interface components {
             /** Format: int64 */
             version: number | string;
         };
+        ListingSyncAvailabilityResponse: {
+            canStart: boolean;
+            blockedReason: null | string;
+            requiredAction: string;
+            /** Format: date-time */
+            retryAfterUntil: null | string;
+            /** Format: uuid */
+            activeRunId: null | string;
+        };
+        ListingSyncCountersResponse: {
+            /** Format: int32 */
+            total: number | string;
+            /** Format: int32 */
+            found: number | string;
+            /** Format: int32 */
+            blockingRetryable: number | string;
+            /** Format: int32 */
+            blockingNonRetryable: number | string;
+            /** Format: int32 */
+            pending: number | string;
+            byOutcome: {
+                [key: string]: number | string;
+            };
+            byOrigin: {
+                [key: string]: number | string;
+            };
+            /** Format: int32 */
+            listingsCreated: number | string;
+            /** Format: int32 */
+            observationsAppended: number | string;
+        };
+        ListingSyncRunItemResponse: {
+            externalListingId: string;
+            origin: components["schemas"]["MarketplaceListingSyncItemOrigin"];
+            outcome: components["schemas"]["MarketplaceListingSyncItemOutcome"];
+            safeErrorCode: null | string;
+            /** Format: uuid */
+            marketplaceListingId: null | string;
+            retryable: boolean;
+        };
+        ListingSyncRunResponse: {
+            /** Format: uuid */
+            runId: string;
+            /** Format: uuid */
+            accountId: string;
+            kind: components["schemas"]["MarketplaceListingSyncKind"];
+            status: components["schemas"]["MarketplaceListingSyncStatus"];
+            phase: null | components["schemas"]["MarketplaceListingSyncPhase"];
+            /** Format: uuid */
+            rootRunId: string;
+            /** Format: uuid */
+            retryOfRunId: null | string;
+            /** Format: date-time */
+            requestedAt: string;
+            /** Format: date-time */
+            startedAt: null | string;
+            /** Format: date-time */
+            finishedAt: null | string;
+            /** Format: int32 */
+            attemptCount: number | string;
+            enumerationCompleted: boolean;
+            counters: components["schemas"]["ListingSyncCountersResponse"];
+            safeResultCode: null | string;
+            requiredAction: string;
+        };
+        ListingSyncStatusResponse: {
+            availability: components["schemas"]["ListingSyncAvailabilityResponse"];
+            summary: components["schemas"]["ListingSyncSummaryResponse"];
+        };
+        ListingSyncSummaryResponse: {
+            activeRun: null | components["schemas"]["ListingSyncRunResponse"];
+            latestRun: null | components["schemas"]["ListingSyncRunResponse"];
+            latestFullRun: null | components["schemas"]["ListingSyncRunResponse"];
+            /** Format: date-time */
+            lastSucceededFullRunAt: null | string;
+            /** Format: int32 */
+            openBlockingItemCount: number | string;
+            health: components["schemas"]["MarketplaceListingSyncHealth"];
+        };
         LoginRequest: {
             email: string;
             password: string;
@@ -4991,15 +5539,31 @@ export interface components {
             notes: null | string;
             items: components["schemas"]["ManualSaleItemRequest"][];
         };
+        /** @enum {unknown} */
+        MarketplaceAccountSkuMappingInvalidatedReason: "OPERATOR_DEACTIVATED" | "REPLACED_BY_NEW_MAPPING" | null;
         MarketplaceAccountUpdateRequest: {
             displayName: string;
             /** Format: int64 */
             version: number | string;
         };
         /** @enum {unknown} */
-        MarketplaceLinkageState: "UNLINKED" | "NEEDS_REVIEW" | "LINKED" | null;
+        MarketplaceLinkageState: "UNLINKED" | "NEEDS_REVIEW" | "LINKED";
         /** @enum {unknown} */
-        MarketplaceListingStatus: "DRAFT" | "ACTIVE" | "PAUSED" | "INACTIVE" | "ERROR" | null;
+        MarketplaceListingLinkageSource: "MANUAL" | "DETERMINISTIC_SKU" | null;
+        /** @enum {unknown} */
+        MarketplaceListingStatus: "DRAFT" | "ACTIVE" | "PAUSED" | "INACTIVE" | "ERROR";
+        /** @enum {unknown} */
+        MarketplaceListingSyncHealth: "NEVER_RUN" | "IN_PROGRESS" | "HEALTHY" | "ATTENTION_REQUIRED" | "FAILED";
+        /** @enum {unknown} */
+        MarketplaceListingSyncItemOrigin: "ENUMERATED" | "KNOWN_NOT_ENUMERATED" | "RETRY_TARGET";
+        /** @enum {unknown} */
+        MarketplaceListingSyncItemOutcome: "PENDING" | "FOUND" | "NOT_FOUND" | "ACCESS_DENIED" | "SELLER_MISMATCH" | "TRANSIENT_ERROR" | "PERMANENT_ERROR";
+        /** @enum {unknown} */
+        MarketplaceListingSyncKind: "FULL" | "FAILED_ONLY";
+        /** @enum {unknown} */
+        MarketplaceListingSyncPhase: "ENUMERATING" | "RECONCILING_MISSING" | "DETAILING" | null;
+        /** @enum {unknown} */
+        MarketplaceListingSyncStatus: "QUEUED" | "RUNNING" | "SUCCEEDED" | "PARTIAL" | "FAILED";
         MarketplaceListingWriteRequest: {
             /** Format: uuid */
             marketplaceAccountId: string;
@@ -5011,7 +5575,7 @@ export interface components {
             observedStatus: components["schemas"]["MarketplaceListingStatus"];
         };
         /** @enum {unknown} */
-        MarketplaceSyncState: "NEVER_SYNCED" | "SYNCED" | "ERROR" | null;
+        MarketplaceSyncState: "NEVER_SYNCED" | "SYNCED" | "ERROR";
         MaterialCostBreakdown: {
             /** Format: uuid */
             supplyId: string;
@@ -5060,6 +5624,24 @@ export interface components {
             externalSku?: null | string;
             titleSnapshot?: null | string;
             providerNativeStatus?: null | string;
+        };
+        PagedResponseOfListingSyncRunItemResponse: {
+            items: components["schemas"]["ListingSyncRunItemResponse"][];
+            /** Format: int32 */
+            page: number | string;
+            /** Format: int32 */
+            pageSize: number | string;
+            /** Format: int32 */
+            total: number | string;
+        };
+        PagedResponseOfSkuMappingResponse: {
+            items: components["schemas"]["SkuMappingResponse"][];
+            /** Format: int32 */
+            page: number | string;
+            /** Format: int32 */
+            pageSize: number | string;
+            /** Format: int32 */
+            total: number | string;
         };
         /** @enum {unknown} */
         PersonType: "Individual" | "Company";
@@ -5115,6 +5697,14 @@ export interface components {
             commissionAmount: number | string;
             feeClampApplied: null | string;
             warnings: string[];
+        };
+        ProblemDetails: {
+            type?: null | string;
+            title?: null | string;
+            /** Format: int32 */
+            status?: null | number | string;
+            detail?: null | string;
+            instance?: null | string;
         };
         ProductCreateRequest: {
             code: string;
@@ -5309,6 +5899,55 @@ export interface components {
             deliveryTerms: null | string;
             warranty: null | string;
             notes: null | string;
+        };
+        PublishedItemReadModel: {
+            /** Format: uuid */
+            id: string;
+            providerCode: string;
+            /** Format: uuid */
+            marketplaceAccountId: string;
+            accountName: string;
+            /** Format: uuid */
+            salesChannelId: string;
+            channelCode: string;
+            channelName: string;
+            externalListingId: string;
+            externalSku: null | string;
+            title: null | string;
+            /** Format: double */
+            observedPrice: null | number | string;
+            observedStatus: components["schemas"]["MarketplaceListingStatus"];
+            /** Format: uuid */
+            productId: null | string;
+            productCode: null | string;
+            productName: null | string;
+            /** Format: uuid */
+            channelOfferId: null | string;
+            linkageState: components["schemas"]["MarketplaceLinkageState"];
+            syncState: components["schemas"]["MarketplaceSyncState"];
+            /** Format: date-time */
+            lastObservedAt: null | string;
+            /** Format: date-time */
+            lastSyncAttemptAt: null | string;
+            /** Format: date-time */
+            lastSuccessfulSyncAt: null | string;
+            safeSyncError: null | string;
+            /** Format: int64 */
+            version: number | string;
+            listingUrl: null | string;
+            providerNativeStatus: null | string;
+            /** Format: int32 */
+            variationCount: null | number | string;
+            linkageSource: null | components["schemas"]["MarketplaceListingLinkageSource"];
+        };
+        PublishedItemsResponse: {
+            items: components["schemas"]["PublishedItemReadModel"][];
+            /** Format: int32 */
+            page: number | string;
+            /** Format: int32 */
+            pageSize: number | string;
+            /** Format: int32 */
+            total: number | string;
         };
         PurchaseReceiptRequest: {
             /** Format: double */
@@ -5670,6 +6309,38 @@ export interface components {
         SetupAccountRequest: {
             token: string;
             password: string;
+        };
+        SkuMappingConfirmRequest: {
+            externalSku: null | string;
+            /** Format: uuid */
+            productId: string;
+            /** Format: uuid */
+            replaceMappingId: null | string;
+            /** Format: int64 */
+            replaceMappingVersion: null | number | string;
+        };
+        SkuMappingDeactivateRequest: {
+            /** Format: int64 */
+            version: null | number | string;
+        };
+        SkuMappingResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            marketplaceAccountId: string;
+            externalSku: string;
+            /** Format: uuid */
+            productId: string;
+            productCode: null | string;
+            productName: null | string;
+            active: boolean;
+            /** Format: date-time */
+            confirmedAt: string;
+            /** Format: date-time */
+            invalidatedAt: null | string;
+            invalidatedReason: null | components["schemas"]["MarketplaceAccountSkuMappingInvalidatedReason"];
+            /** Format: int64 */
+            version: number | string;
         };
         /** @enum {unknown} */
         SupplyBaseUnit: "Gram" | "Kilogram" | "Unit" | "Milliliter" | "Liter" | "Meter" | "Centimeter";

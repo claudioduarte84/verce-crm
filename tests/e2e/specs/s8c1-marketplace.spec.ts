@@ -123,6 +123,12 @@ async function completeAuthorizationRoundTrip(
   return capturedSessionId
 }
 
+/** The S8C.1 authorization guidance lives in the connected-account card. Since S8C.2 C4 the page also carries a separate listing-sync block with its own
+ * alerts (for the FAKE provider: availability CONTACT_ADMIN), so a page-wide role=alert query is no longer specific to authorization. */
+function authorizationAlerts(page: Page): Locator {
+  return page.locator('div.card').filter({ has: page.getByRole('heading', { name: 'Conta conectada' }) }).getByRole('alert')
+}
+
 function selectAccountByDisplayName(page: Page, displayName: string) {
   return page.getByRole('button', { name: displayName, exact: true }).click()
 }
@@ -144,7 +150,7 @@ test.describe('S8C.1 marketplace authorization (real browser, real HTTP, isolate
 
     await selectAccountByDisplayName(page, displayName)
     await expect(page.getByRole('status').getByText('CONNECTED', { exact: false })).toBeVisible()
-    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(authorizationAlerts(page)).toHaveCount(0)
 
     // Voluntary reconnect — the real "Reautorizar" recovery path, not triggered by any failure.
     await completeAuthorizationRoundTrip(
@@ -156,7 +162,7 @@ test.describe('S8C.1 marketplace authorization (real browser, real HTTP, isolate
     await page.goto('/marketplace-accounts')
     await selectAccountByDisplayName(page, displayName)
     await expect(page.getByRole('status').getByText('CONNECTED', { exact: false })).toBeVisible()
-    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(authorizationAlerts(page)).toHaveCount(0)
   })
 
   test('store-loss recovery: probe after simulated local-store loss routes to reauthorize, and reconnecting issues a fresh (K2) credential', async ({ page, request }) => {
@@ -193,7 +199,7 @@ test.describe('S8C.1 marketplace authorization (real browser, real HTTP, isolate
     ])
     expect(probeResponse.status()).toBe(409)
     await expect(page.getByText('Sondagem falhou', { exact: false })).toBeVisible()
-    await expect(page.getByRole('alert')).toContainText('perda de armazenamento/chave', { ignoreCase: true })
+    await expect(authorizationAlerts(page)).toContainText('perda de armazenamento/chave', { ignoreCase: true })
     const recoverButton = page.getByRole('button', { name: 'Recuperar credencial (reautorizar)' })
     await expect(recoverButton).toBeVisible()
 
@@ -206,7 +212,7 @@ test.describe('S8C.1 marketplace authorization (real browser, real HTTP, isolate
     await page.goto('/marketplace-accounts')
     await selectAccountByDisplayName(page, displayName)
     await expect(page.getByRole('status').getByText('CONNECTED', { exact: false })).toBeVisible()
-    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(authorizationAlerts(page)).toHaveCount(0)
 
     // K1 -> K2: a NEW confirmed credential file exists — never a silent reuse of the lost one.
     const confirmedFilesAfter = readdirSync(credentialStoreRoot)
@@ -244,7 +250,7 @@ test.describe('S8C.1 marketplace authorization (real browser, real HTTP, isolate
     await expect(page.getByRole('button', { name: displayName2, exact: true })).toHaveCount(0)
 
     await selectAccountByDisplayName(page, displayName1)
-    await expect(page.getByRole('alert')).toContainText('Uma nova autorização identificou esta MESMA conta', { ignoreCase: true })
+    await expect(authorizationAlerts(page)).toContainText('Uma nova autorização identificou esta MESMA conta', { ignoreCase: true })
     await expect(page.getByRole('button', { name: 'Reconectar conta existente' })).toBeVisible()
   })
 })

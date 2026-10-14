@@ -69,7 +69,7 @@ const e2eHostDll = resolve(repoRoot, 'tests', 'Verce.Marketplaces.E2EHost', 'bin
 
 export default defineConfig({
   testDir: './specs',
-  testMatch: /s8c1-marketplace\.spec\.ts/,
+  testMatch: /s8c1-marketplace\.spec\.ts|s8c2-mercadolivre-listings\.spec\.ts/,
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -84,6 +84,11 @@ export default defineConfig({
   projects: [
     { name: 'setup', testMatch: /auth\.setup\.ts/, use: { ...devices['Desktop Chrome'] } },
     { name: 'marketplace', dependencies: ['setup'], testMatch: /s8c1-marketplace\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'auth.json') } },
+    // S8C.2 D11: the Mercado Livre listings journey (Owner), then the same spec's read-only Viewer check against the data that journey left behind.
+    // Both run against the SAME test-owned host and disposable database, strictly after the S8C.1 project (single worker, explicit order).
+    { name: 'marketplace-ml', dependencies: ['marketplace'], testMatch: /s8c2-mercadolivre-listings\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'auth.json') } },
+    { name: 'viewer-setup', dependencies: ['setup'], testMatch: /viewer\.setup\.ts/, use: { ...devices['Desktop Chrome'] } },
+    { name: 'marketplace-ml-viewer', dependencies: ['marketplace-ml', 'viewer-setup'], testMatch: /s8c2-mercadolivre-listings\.spec\.ts/, use: { ...devices['Desktop Chrome'], storageState: resolve(__dirname, '.playwright', 'viewer.json') } },
   ],
   webServer: [
     {

@@ -927,6 +927,94 @@ namespace Verce.Platform.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceAccountSkuMapping", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasColumnName("active");
+
+                    b.Property<DateTimeOffset>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("confirmed_at");
+
+                    b.Property<Guid>("ConfirmedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("confirmed_by_user_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("ExternalSku")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("external_sku");
+
+                    b.Property<DateTimeOffset?>("InvalidatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("invalidated_at");
+
+                    b.Property<Guid?>("InvalidatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("invalidated_by_user_id");
+
+                    b.Property<string>("InvalidatedReason")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("invalidated_reason");
+
+                    b.Property<Guid>("MarketplaceAccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("marketplace_account_id");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("product_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_marketplace_account_sku_mapping");
+
+                    b.HasIndex("ProductId")
+                        .HasDatabaseName("ix_marketplace_account_sku_mapping_product_id");
+
+                    b.HasIndex("MarketplaceAccountId", "Active")
+                        .HasDatabaseName("ix_marketplace_account_sku_mapping_marketplace_account_id_acti");
+
+                    b.HasIndex("MarketplaceAccountId", "ExternalSku")
+                        .IsUnique()
+                        .HasDatabaseName("ix_marketplace_account_sku_mapping_marketplace_account_id_exte")
+                        .HasFilter("active");
+
+                    b.ToTable("marketplace_account_sku_mapping", "commerce", t =>
+                        {
+                            t.HasCheckConstraint("ck_marketplace_account_sku_mapping_active", "active = (invalidated_at IS NULL AND invalidated_reason IS NULL)");
+
+                            t.HasCheckConstraint("ck_marketplace_account_sku_mapping_reason", "invalidated_reason IS NULL OR invalidated_reason IN ('OPERATOR_DEACTIVATED','REPLACED_BY_NEW_MAPPING')");
+                        });
+                });
+
             modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceAuthorizationSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1059,6 +1147,10 @@ namespace Verce.Platform.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<bool>("AutoLinkSuppressed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("auto_link_suppressed");
+
                     b.Property<Guid?>("ChannelOfferId")
                         .HasColumnType("uuid")
                         .HasColumnName("channel_offer_id");
@@ -1089,6 +1181,15 @@ namespace Verce.Platform.Migrations
                     b.Property<DateTimeOffset?>("LastSyncAttemptAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_sync_attempt_at");
+
+                    b.Property<string>("LatestObservationFingerprint")
+                        .HasColumnType("char(64)")
+                        .HasColumnName("latest_observation_fingerprint");
+
+                    b.Property<string>("LinkageSource")
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("linkage_source");
 
                     b.Property<string>("LinkageState")
                         .IsRequired()
@@ -1128,6 +1229,10 @@ namespace Verce.Platform.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("provider_observed_at");
 
+                    b.Property<Guid?>("SkuMappingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("sku_mapping_id");
+
                     b.Property<string>("SyncError")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
@@ -1152,6 +1257,10 @@ namespace Verce.Platform.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("updated_by");
 
+                    b.Property<int?>("VariationCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("variation_count");
+
                     b.Property<long>("Version")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint")
@@ -1172,6 +1281,9 @@ namespace Verce.Platform.Migrations
                     b.HasIndex("ProductId")
                         .HasDatabaseName("ix_marketplace_listing_product_id");
 
+                    b.HasIndex("SkuMappingId")
+                        .HasDatabaseName("ix_marketplace_listing_sku_mapping_id");
+
                     b.HasIndex("SyncState")
                         .HasDatabaseName("ix_marketplace_listing_sync_state");
 
@@ -1182,13 +1294,24 @@ namespace Verce.Platform.Migrations
                     b.HasIndex("MarketplaceAccountId", "ExternalSku")
                         .HasDatabaseName("ix_marketplace_listing_marketplace_account_id_external_sku");
 
+                    b.HasIndex("MarketplaceAccountId", "SyncState")
+                        .HasDatabaseName("ix_marketplace_listing_marketplace_account_id_sync_state");
+
                     b.ToTable("marketplace_listing", "commerce", t =>
                         {
                             t.HasCheckConstraint("ck_marketplace_listing_linkage", "(linkage_state = 'LINKED' AND product_id IS NOT NULL) OR (linkage_state IN ('UNLINKED','NEEDS_REVIEW') AND product_id IS NULL AND channel_offer_id IS NULL)");
 
+                            t.HasCheckConstraint("ck_marketplace_listing_linkage_source", "linkage_source IS NULL OR linkage_source IN ('MANUAL','DETERMINISTIC_SKU')");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_linkage_source_required", "(linkage_state = 'LINKED') = (linkage_source IS NOT NULL)");
+
                             t.HasCheckConstraint("ck_marketplace_listing_observed_price", "observed_price IS NULL OR observed_price > 0");
 
                             t.HasCheckConstraint("ck_marketplace_listing_offer_linkage", "channel_offer_id IS NULL OR linkage_state = 'LINKED'");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sku_mapping", "(linkage_source = 'DETERMINISTIC_SKU') = (sku_mapping_id IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_variation_count", "variation_count IS NULL OR variation_count >= 0");
                         });
                 });
 
@@ -1252,7 +1375,7 @@ namespace Verce.Platform.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("provider_native_status");
 
-                    b.Property<DateTimeOffset>("ProviderObservedAt")
+                    b.Property<DateTimeOffset?>("ProviderObservedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("provider_observed_at");
 
@@ -1269,6 +1392,10 @@ namespace Verce.Platform.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("updated_by");
 
+                    b.Property<int?>("VariationCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("variation_count");
+
                     b.HasKey("Id")
                         .HasName("pk_marketplace_listing_observation");
 
@@ -1279,7 +1406,275 @@ namespace Verce.Platform.Migrations
                     b.HasIndex("MarketplaceListingId", "ProviderObservedAt", "IngestedAt")
                         .HasDatabaseName("ix_marketplace_listing_observation_marketplace_listing_id_prov");
 
-                    b.ToTable("marketplace_listing_observation", "commerce");
+                    b.ToTable("marketplace_listing_observation", "commerce", t =>
+                        {
+                            t.HasCheckConstraint("ck_marketplace_listing_observation_variation_count", "variation_count IS NULL OR variation_count >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceListingSyncRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<Guid?>("ConfirmedOperationIdAtStart")
+                        .HasColumnType("uuid")
+                        .HasColumnName("confirmed_operation_id_at_start");
+
+                    b.Property<bool>("EnumerationCompleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("enumeration_completed");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finished_at");
+
+                    b.Property<DateTimeOffset?>("HeartbeatAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("heartbeat_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("LastFailureClassification")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("last_failure_classification");
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lease_token");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("lease_until");
+
+                    b.Property<Guid>("MarketplaceAccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("marketplace_account_id");
+
+                    b.Property<int>("MaxAttempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(3)
+                        .HasColumnName("max_attempts");
+
+                    b.Property<string>("Phase")
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("phase");
+
+                    b.Property<string>("ProviderCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("provider_code");
+
+                    b.Property<string>("ProviderErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("provider_error_code");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("requested_by_user_id");
+
+                    b.Property<DateTimeOffset?>("RetryAfterUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("retry_after_until");
+
+                    b.Property<Guid?>("RetryOfRunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("retry_of_run_id");
+
+                    b.Property<Guid>("RootRunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("root_run_id");
+
+                    b.Property<string>("SafeResultCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("safe_result_code");
+
+                    b.Property<DateTimeOffset?>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("status");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<long>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id")
+                        .HasName("pk_marketplace_listing_sync_run");
+
+                    b.HasIndex("MarketplaceAccountId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_marketplace_listing_sync_run_marketplace_account_id")
+                        .HasFilter("status IN ('QUEUED','RUNNING')");
+
+                    b.HasIndex("ProviderCode")
+                        .HasDatabaseName("ix_marketplace_listing_sync_run_provider_code");
+
+                    b.HasIndex("RetryOfRunId")
+                        .HasDatabaseName("ix_marketplace_listing_sync_run_retry_of_run_id");
+
+                    b.HasIndex("RootRunId", "RequestedAt")
+                        .HasDatabaseName("ix_marketplace_listing_sync_run_root_run_id_requested_at");
+
+                    b.HasIndex("Status", "LeaseUntil")
+                        .HasDatabaseName("ix_marketplace_listing_sync_run_status_lease_until")
+                        .HasFilter("status = 'RUNNING'");
+
+                    b.HasIndex("Status", "RequestedAt")
+                        .HasDatabaseName("ix_marketplace_listing_sync_run_status_requested_at")
+                        .HasFilter("status IN ('QUEUED','RUNNING')");
+
+                    b.HasIndex("MarketplaceAccountId", "Kind", "RequestedAt")
+                        .IsDescending(false, false, true)
+                        .HasDatabaseName("ix_marketplace_listing_sync_run_marketplace_account_id_kind_re");
+
+                    b.ToTable("marketplace_listing_sync_run", "commerce", t =>
+                        {
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_ancestry", "(kind = 'FULL' AND retry_of_run_id IS NULL AND root_run_id = id) OR (kind = 'FAILED_ONLY' AND retry_of_run_id IS NOT NULL AND enumeration_completed = false)");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_attempts", "attempt_count >= 0 AND attempt_count <= max_attempts AND max_attempts BETWEEN 1 AND 10");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_full_terminal", "kind <> 'FULL' OR status NOT IN ('SUCCEEDED','PARTIAL') OR enumeration_completed = true");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_kind", "kind IN ('FULL','FAILED_ONLY')");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_lease", "(status = 'RUNNING') = (lease_token IS NOT NULL AND lease_until IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_phase", "phase IS NULL OR phase IN ('ENUMERATING','RECONCILING_MISSING','DETAILING')");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_status", "status IN ('QUEUED','RUNNING','SUCCEEDED','PARTIAL','FAILED')");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_terminal", "(status IN ('SUCCEEDED','PARTIAL','FAILED')) = (finished_at IS NOT NULL AND safe_result_code IS NOT NULL AND lease_token IS NULL)");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_version", "version >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceListingSyncRunItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("ExternalListingId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("external_listing_id");
+
+                    b.Property<bool>("ListingCreated")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("listing_created");
+
+                    b.Property<Guid?>("MarketplaceListingId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("marketplace_listing_id");
+
+                    b.Property<bool>("ObservationAppended")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("observation_appended");
+
+                    b.Property<string>("Origin")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("origin");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("outcome");
+
+                    b.Property<string>("ProviderErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("provider_error_code");
+
+                    b.Property<string>("SafeErrorCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("safe_error_code");
+
+                    b.Property<Guid>("SyncRunId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("sync_run_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_marketplace_listing_sync_run_item");
+
+                    b.HasIndex("MarketplaceListingId")
+                        .HasDatabaseName("ix_marketplace_listing_sync_run_item_marketplace_listing_id");
+
+                    b.HasIndex("SyncRunId", "ExternalListingId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_marketplace_listing_sync_run_item_sync_run_id_external_list");
+
+                    b.HasIndex("SyncRunId", "Outcome", "Origin", "ExternalListingId")
+                        .HasDatabaseName("ix_marketplace_listing_sync_run_item_sync_run_id_outcome_origi");
+
+                    b.ToTable("marketplace_listing_sync_run_item", "commerce", t =>
+                        {
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_item_attempts", "attempt_count >= 0");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_item_completion", "(outcome = 'PENDING') = (completed_at IS NULL)");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_item_origin", "origin IN ('ENUMERATED','KNOWN_NOT_ENUMERATED','RETRY_TARGET')");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_item_outcome", "outcome IN ('PENDING','FOUND','NOT_FOUND','ACCESS_DENIED','SELLER_MISMATCH','TRANSIENT_ERROR','PERMANENT_ERROR')");
+
+                            t.HasCheckConstraint("ck_marketplace_listing_sync_run_item_result", "(outcome = 'FOUND' AND marketplace_listing_id IS NOT NULL AND safe_error_code IS NULL) OR (outcome = 'PENDING') OR (outcome <> 'FOUND' AND safe_error_code IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceListingTag", b =>
@@ -5034,6 +5429,16 @@ namespace Verce.Platform.Migrations
                         .HasConstraintName("fk_marketplace_account_operation_marketplace_provider_provider");
                 });
 
+            modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceAccountSkuMapping", b =>
+                {
+                    b.HasOne("Verce.Modules.Commerce.MarketplaceAccount", null)
+                        .WithMany()
+                        .HasForeignKey("MarketplaceAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_marketplace_account_sku_mapping_marketplace_account_marketp");
+                });
+
             modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceAuthorizationSession", b =>
                 {
                     b.HasOne("Verce.Modules.Commerce.MarketplaceProvider", null)
@@ -5058,6 +5463,12 @@ namespace Verce.Platform.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_marketplace_listing_marketplace_account_marketplace_account");
+
+                    b.HasOne("Verce.Modules.Commerce.MarketplaceAccountSkuMapping", null)
+                        .WithMany()
+                        .HasForeignKey("SkuMappingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_marketplace_listing_marketplace_account_sku_mapping_sku_map");
                 });
 
             modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceListingObservation", b =>
@@ -5068,6 +5479,52 @@ namespace Verce.Platform.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_marketplace_listing_observation_marketplace_listing_marketp");
+                });
+
+            modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceListingSyncRun", b =>
+                {
+                    b.HasOne("Verce.Modules.Commerce.MarketplaceAccount", null)
+                        .WithMany()
+                        .HasForeignKey("MarketplaceAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_marketplace_listing_sync_run_marketplace_account_marketplac");
+
+                    b.HasOne("Verce.Modules.Commerce.MarketplaceProvider", null)
+                        .WithMany()
+                        .HasForeignKey("ProviderCode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_marketplace_listing_sync_run_marketplace_provider_provider_");
+
+                    b.HasOne("Verce.Modules.Commerce.MarketplaceListingSyncRun", null)
+                        .WithMany()
+                        .HasForeignKey("RetryOfRunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_marketplace_listing_sync_run_retry_of_run");
+
+                    b.HasOne("Verce.Modules.Commerce.MarketplaceListingSyncRun", null)
+                        .WithMany()
+                        .HasForeignKey("RootRunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_marketplace_listing_sync_run_root_run");
+                });
+
+            modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceListingSyncRunItem", b =>
+                {
+                    b.HasOne("Verce.Modules.Commerce.MarketplaceListing", null)
+                        .WithMany()
+                        .HasForeignKey("MarketplaceListingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_marketplace_listing_sync_run_item_marketplace_listing_marke");
+
+                    b.HasOne("Verce.Modules.Commerce.MarketplaceListingSyncRun", null)
+                        .WithMany()
+                        .HasForeignKey("SyncRunId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_marketplace_listing_sync_run_item_marketplace_listing_sync_");
                 });
 
             modelBuilder.Entity("Verce.Modules.Commerce.MarketplaceListingTag", b =>

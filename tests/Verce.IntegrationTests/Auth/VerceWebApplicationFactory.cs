@@ -66,6 +66,10 @@ public sealed class VerceWebApplicationFactory : WebApplicationFactory<Program>
     /// in-memory <c>TestServer</c> transport every other caller of this factory keeps using.</summary>
     public IReadOnlyList<string>? RealServerAddresses { get; private set; }
 
+    /// <summary>The service provider of the REAL Kestrel host (null unless <c>useRealKestrelServer</c>). <see cref="WebApplicationFactory{TEntryPoint}.Services"/> is the throwaway
+    /// TestServer host in that mode, so anything that must act inside the host a browser actually reaches (e.g. the E2E host starting that host's scheduler) needs this.</summary>
+    public IServiceProvider? RealHostServices => _realKestrelHost?.Services;
+
     /// <param name="connectionString">The real PostgreSQL connection string.</param>
     /// <param name="extraConfiguration">Additional configuration overrides — e.g. a host-execution
     /// test (mission §19-23) passes <c>Outbox:SchedulingEnabled=true</c> plus fast test cadences.

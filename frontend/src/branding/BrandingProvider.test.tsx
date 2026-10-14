@@ -50,7 +50,7 @@ describe('BrandingProvider', () => {
     render(<BrandingProvider><Probe /></BrandingProvider>)
     await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('ready'))
     expect(screen.getByTestId('name')).toHaveTextContent('VERCE Custom')
-    expect(document.title).toBe('VERCE Custom | Laboratório Custom')
+    await waitFor(() => expect(document.title).toBe('VERCE Custom | Laboratório Custom'))
     expect(document.querySelector("link[rel~='icon']")?.getAttribute('href')).toBe('/api/settings/brand-assets/versions/v1/content')
   })
 

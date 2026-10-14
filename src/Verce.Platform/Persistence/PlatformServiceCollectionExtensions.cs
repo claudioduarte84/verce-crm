@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Verce.Platform.Audit;
 using Verce.Platform.Cli;
 using Verce.Platform.Health;
@@ -30,6 +31,12 @@ public static class PlatformServiceCollectionExtensions
     {
         VerceDbContext.ConfigureModuleAssemblies(moduleAssemblies);
         services.AddSingleton<IClock, SystemClock>();
+
+        // A-09: the ONE authoritative public-origin setting — validated at startup, consumed by
+        // every subsystem that needs to know the application's own external origin (e.g. a
+        // provider OAuth redirect-origin check) instead of each declaring its own copy.
+        services.AddOptions<PublicOriginOptions>().Bind(configuration.GetSection(PublicOriginOptions.SectionName)).ValidateOnStart();
+        services.AddSingleton<IValidateOptions<PublicOriginOptions>, PublicOriginOptionsValidator>();
 
         // Built once at startup; throws loudly on a broken ownership chain (ADR-0011 §2.5).
         var assembliesForOwnership = moduleAssemblies

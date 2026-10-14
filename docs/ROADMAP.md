@@ -673,7 +673,19 @@ defects that only a real rotating-token provider makes reachable (D-01 expiry pe
 refresh send-certainty/same-R2 persistence retry, D-03 probe grant provenance/Retry-After) are
 classified as defects under the unchanged ADR-0024 and are fixed first in S8C.2 (ADR-0025 §A.0).
 
-### S8C.2 — Validated Marketplace Listing Reads & Normalized Observations — ARCHITECTURE FROZEN (IMPLEMENTATION NEXT; NOT IMPLEMENTED)
+### S8C.2 — Validated Marketplace Listing Reads & Normalized Observations — ARCHITECTURE FROZEN; IMPLEMENTATION IN PROGRESS
+
+**Slice 1 gate record (2026-10-09) — PASS.** The B7 SKU-mapping authority API and C1/C2 contract
+slice is closed after the ADR-0028 deactivation-replay regate. Independently verified: ACTIVE with
+the current version transitions with one version increment and audit; INACTIVE with its current
+version is a 204 no-op; a stale version returns 409 `CONCURRENCY_CONFLICT` before the state check;
+an unknown mapping returns 404; and two concurrent deactivations yield one 204 and one 409 with one
+persisted transition. The focused SKU Mapping suite passed 21/21, the Release build had zero warnings
+and errors, and `api:check` passed. The reported full integration result (845/845) and pre038/post038
+manifests were not available for independent inspection and are recorded only as declared evidence;
+they were not reconstructed. C3 and C4 have not started. This Slice 1 record does not promote S8C.2
+to `IMPLEMENTED_PENDING_LIVE_PROVIDER_VALIDATION` or COMPLETE; those statuses remain governed by the
+completion gate in the handoff.
 
 Architecture approved and frozen by the final independent Sol regate on 2026-09-26 in
 [ADR-0025](architecture/ADR-0025-s8c2-mercado-livre-listing-read-integration.md); implementation handoff is

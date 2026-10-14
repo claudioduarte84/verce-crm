@@ -38,7 +38,11 @@ public sealed class MarketplaceAccountConnection : Entity, IOwnedBy<MarketplaceA
 
     internal static MarketplaceAccountConnection NotConnected(Guid accountId) => new(accountId);
 
-    internal void Confirm(Guid operationId, long credentialVersion, DateTimeOffset now)
+    // D-01: AccessExpiresAt is modeled but was never actually written by any confirmation path,
+    // so every use looked expired and forced a refresh. `isRefresh` additionally records
+    // LastRefreshAt; a receipt-only recovery confirmation passes accessExpiresAt=null (unknown
+    // expiry forces a refresh on next use rather than assuming a stale/guessed value).
+    internal void Confirm(Guid operationId, long credentialVersion, DateTimeOffset now, DateTimeOffset? accessExpiresAt = null, bool isRefresh = false)
     {
         if (operationId == Guid.Empty || credentialVersion < 1) throw new ArgumentException("MARKETPLACE_CONFIRMATION_INVALID");
         AuthorizationState = MarketplaceAuthorizationState.CONNECTED;
@@ -46,8 +50,19 @@ public sealed class MarketplaceAccountConnection : Entity, IOwnedBy<MarketplaceA
         IdentityVerifiedAt = now;
         ConfirmedOperationId = operationId;
         ConfirmedCredentialVersion = credentialVersion;
+        AccessExpiresAt = accessExpiresAt;
+        if (isRefresh) LastRefreshAt = now;
         SafeFailureCode = null;
         LastFailureClassification = null;
+        RuntimeRetryAfterUntil = null;
+        UpdatedAt = now;
+    }
+
+    /// <summary>D-03: a persisted provider Retry-After/backoff guard, honored by probe and by
+    /// business execution so a 429 is not silently ignored across restarts.</summary>
+    internal void RecordRetryAfter(DateTimeOffset until, DateTimeOffset now)
+    {
+        RuntimeRetryAfterUntil = until;
         UpdatedAt = now;
     }
 
@@ -80,6 +95,9 @@ public sealed class MarketplaceAccountConnection : Entity, IOwnedBy<MarketplaceA
         if (AuthorizationState != MarketplaceAuthorizationState.CONNECTED) throw new InvalidOperationException("MARKETPLACE_AUTHORIZATION_NOT_USABLE");
         RuntimeAvailability = MarketplaceRuntimeAvailability.AVAILABLE;
         LastSuccessAt = now;
+        LastFailureClassification = null;
+        SafeFailureCode = null;
+        RuntimeRetryAfterUntil = null;
         UpdatedAt = now;
     }
 

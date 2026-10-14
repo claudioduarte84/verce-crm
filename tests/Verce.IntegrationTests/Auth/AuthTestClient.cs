@@ -42,6 +42,16 @@ public sealed class AuthTestClient
         return response;
     }
 
+    /// <summary>POST with caller-supplied content (null = no request body at all), for contracts that forbid a body or need a non-JSON payload.</summary>
+    public async Task<HttpResponseMessage> PostRawAsync(string path, HttpContent? content, bool withAntiforgery = true)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
+        ApplyCookies(request);
+        if (withAntiforgery && _cookies.TryGetValue("XSRF-TOKEN", out var token)) request.Headers.Add("X-XSRF-TOKEN", token);
+        var response = await _client.SendAsync(request);
+        CaptureCookies(response);
+        return response;
+    }
     public async Task<HttpResponseMessage> PutAsync<T>(string path, T body, bool withAntiforgery = true) =>
         await SendJsonAsync(HttpMethod.Put, path, body, withAntiforgery);
 
